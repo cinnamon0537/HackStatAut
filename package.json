@@ -1,0 +1,15 @@
+{
+  "name": "hackstataut",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js",
+    "show": "node scripts/show.mjs"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "playwright": "^1.54.2"
+  }
+}

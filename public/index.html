@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ChatWithYourData</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="panel chat-panel">
+        <div class="panel-header">
+          <div>
+            <div class="eyebrow">ChatWithYourData</div>
+            <h1>OpenCode im Web</h1>
+          </div>
+          <div class="status-pill" id="opencode-status">startet ...</div>
+        </div>
+        <iframe id="opencode-frame" class="opencode-frame" src="http://127.0.0.1:4096/" title="OpenCode Web"></iframe>
+      </section>
+
+      <section class="panel viz-panel">
+        <div class="panel-header">
+          <div>
+            <div class="eyebrow">Daten</div>
+            <h1>Dateien & Visualisierung</h1>
+          </div>
+          <div class="mode-row">
+            <select id="mode-select">
+              <option value="auto">Auto</option>
+              <option value="text">Text</option>
+              <option value="json">JSON</option>
+              <option value="table">Tabelle</option>
+              <option value="chart">Balken</option>
+              <option value="pie">Pie</option>
+              <option value="image">Bild</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="viz-controls">
+          <div class="files">
+            <div class="subhead">Dateien</div>
+            <div id="file-tree" class="file-tree"></div>
+          </div>
+
+          <div class="viz-work">
+            <label class="subhead" for="viz-prompt">Visualisierung</label>
+            <textarea id="viz-prompt" rows="3" placeholder="z.B. visualisier diese Datei als Tabelle, oder bau ein Piechart daraus"></textarea>
+            <div class="action-row">
+              <div id="selected-file" class="selected-file">Noch keine Datei gewählt</div>
+              <div class="button-row">
+                <button id="refresh-files" class="ghost" type="button">Neu laden</button>
+                <button id="visualize-file" type="button">Visualisieren</button>
+              </div>
+            </div>
+            <div id="viz-meta" class="viz-meta"></div>
+            <div id="viz-root" class="viz-root"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
