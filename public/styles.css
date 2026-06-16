@@ -97,6 +97,11 @@ h1 {
   font-size: 12px;
 }
 
+.status-pill.active {
+  color: var(--accent-2);
+  border-color: rgba(160, 0, 20, 0.45);
+}
+
 .opencode-frame {
   flex: 1;
   width: 100%;
