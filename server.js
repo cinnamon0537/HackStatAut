@@ -9,12 +9,36 @@ import { randomUUID } from 'node:crypto';
 const app = express();
 const ROOT = process.cwd();
 const PORT = Number(process.env.PORT || 3000);
+const OPENCODE_WEB_PORT = Number(process.env.OPENCODE_WEB_PORT || 4096);
+const OPENCODE_WEB_URL = `http://127.0.0.1:${OPENCODE_WEB_PORT}`;
 const VIZ_ROOT = path.join(ROOT, 'tmp', 'viz');
 const MAX_INPUT_BYTES = 2 * 1024 * 1024;
 const PYTHON_TIMEOUT_MS = 20000;
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static('public'));
+
+async function ensureOpenCodeWeb() {
+  try {
+    const response = await fetch(`${OPENCODE_WEB_URL}/api/health`);
+    if (response.ok) return;
+  } catch {
+    // start below
+  }
+
+  const child = spawn('opencode', ['web', '--port', String(OPENCODE_WEB_PORT), '--hostname', '127.0.0.1', '--pure'], {
+    cwd: ROOT,
+    env: process.env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true,
+  });
+
+  child.stdout.on('data', (chunk) => process.stdout.write(chunk));
+  child.stderr.on('data', (chunk) => process.stderr.write(chunk));
+  child.unref();
+}
+
+void ensureOpenCodeWeb();
 
 const IGNORED_DIRS = new Set(['.git', '.secrets', 'node_modules', 'playwright-report', 'test-results', 'tmp']);
 
@@ -29,6 +53,167 @@ const VIZ_PROMPT = [
   'Der Python-Code soll nur stdlib benutzen und im aktuellen Arbeitsordner `artifact.svg`, `artifact.png`, `artifact.html`, `artifact.json` oder `artifact.txt` schreiben.',
   'Wenn keine Visualisierung nötig ist, antworte normal ohne vizjson-Block.',
 ].join(' ');
+
+const OPENCODE_AGENT = 'build';
+const OPENCODE_MODEL = { providerID: 'opencode', modelID: 'north-mini-code-free' };
+let openCodeSessionId = '';
+let openCodeSessionInit = null;
+
+function makeMessageId() {
+  return `msg_${randomUUID().replaceAll('-', '')}`;
+}
+
+function buildQuery(params = {}) {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === '') continue;
+    search.set(key, String(value));
+  }
+  return search.toString();
+}
+
+async function opencodeRequest(pathname, { method = 'GET', body, query } = {}) {
+  const url = new URL(pathname, OPENCODE_WEB_URL);
+  const search = buildQuery(query);
+  if (search) url.search = search;
+
+  const init = { method };
+  if (body !== undefined) {
+    init.headers = { 'Content-Type': 'application/json' };
+    init.body = JSON.stringify(body);
+  }
+
+  const response = await fetch(url, init);
+  const text = await response.text();
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text;
+  }
+  if (!response.ok) {
+    const message = data?.message || data?.error || data?._tag || response.statusText || 'OpenCode request failed';
+    const error = new Error(message);
+    error.statusCode = response.status;
+    error.data = data;
+    throw error;
+  }
+  return data;
+}
+
+async function ensureOpenCodeSession() {
+  if (openCodeSessionId) return openCodeSessionId;
+  if (openCodeSessionInit) return openCodeSessionInit;
+
+  openCodeSessionInit = (async () => {
+    const created = await opencodeRequest('/api/session', {
+      method: 'POST',
+      body: { location: { directory: ROOT } },
+    });
+    openCodeSessionId = created?.data?.id || created?.id || '';
+    if (!openCodeSessionId) throw new Error('OpenCode session could not be created');
+
+    await opencodeRequest(`/session/${openCodeSessionId}/init`, {
+      method: 'POST',
+      query: { directory: ROOT },
+      body: { providerID: OPENCODE_MODEL.providerID, modelID: OPENCODE_MODEL.modelID, messageID: makeMessageId() },
+    });
+
+    return openCodeSessionId;
+  })();
+
+  try {
+    return await openCodeSessionInit;
+  } finally {
+    openCodeSessionInit = null;
+  }
+}
+
+function readMessageText(messageDetail) {
+  return (messageDetail?.parts || [])
+    .filter((part) => part?.type === 'text' && typeof part.text === 'string')
+    .map((part) => part.text)
+    .join('\n')
+    .trim();
+}
+
+async function waitForAssistantResponse(eventResponse, sessionId, userMessageId, timeoutMs = 120000) {
+  const response = eventResponse || await fetch(`${OPENCODE_WEB_URL}/api/event`);
+  if (!response.ok || !response.body) {
+    throw new Error('OpenCode event stream unavailable');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const startedAt = Date.now();
+
+  try {
+    while (Date.now() - startedAt < timeoutMs) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let idx;
+      while ((idx = buffer.indexOf('\n\n')) >= 0) {
+        const rawEvent = buffer.slice(0, idx).trim();
+        buffer = buffer.slice(idx + 2);
+        if (!rawEvent) continue;
+
+        const dataLine = rawEvent.split('\n').find((line) => line.startsWith('data: '));
+        if (!dataLine) continue;
+
+        let event;
+        try {
+          event = JSON.parse(dataLine.slice(6));
+        } catch {
+          continue;
+        }
+
+        if (event?.data?.sessionID !== sessionId) continue;
+        if (event.type === 'message.updated' && event.data?.info?.role === 'assistant' && event.data?.info?.parentID === userMessageId && event.data?.info?.finish === 'stop') {
+          const assistantId = event.data.info.id;
+          const detail = await opencodeRequest(`/session/${sessionId}/message/${assistantId}`, {
+            query: { directory: ROOT },
+          });
+          return {
+            assistantId,
+            text: readMessageText(detail),
+            detail,
+          };
+        }
+      }
+    }
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+
+  throw new Error('Timed out waiting for OpenCode response');
+}
+
+async function submitOpenCodePrompt(sessionId, message, { visualize = false } = {}) {
+  const userMessageId = makeMessageId();
+  const eventStreamPromise = fetch(`${OPENCODE_WEB_URL}/api/event`);
+  const body = {
+    messageID: userMessageId,
+    agent: OPENCODE_AGENT,
+    model: OPENCODE_MODEL,
+    noReply: true,
+    parts: [{ type: 'text', text: message }],
+  };
+
+  if (visualize) {
+    body.system = VIZ_PROMPT;
+  }
+
+  void opencodeRequest(`/session/${sessionId}/prompt_async`, {
+    method: 'POST',
+    query: { directory: ROOT },
+    body,
+  }).catch(() => {});
+
+  return waitForAssistantResponse(await eventStreamPromise, sessionId, userMessageId);
+}
 
 function safeResolve(requestPath = '') {
   const resolved = path.resolve(ROOT, requestPath || '.');
@@ -457,27 +642,23 @@ app.post('/api/chat', async (req, res) => {
   try {
     const message = String(req.body?.message || '').trim();
     const sessionId = String(req.body?.sessionId || '').trim();
-    const filePath = String(req.body?.filePath || '').trim();
-    const visualizeNext = req.body?.visualizeNext === true || req.body?.visualizeNext === 'true';
     if (!message) return res.status(400).json({ error: 'Message missing' });
 
-    const prompt = visualizeNext || isVizRequest(message) ? `${message}\n\n${VIZ_PROMPT}` : message;
-
-    const result = await runOpenCode({
-      message: prompt,
-      sessionId: sessionId || undefined,
-      filePath: filePath || undefined,
+    const activeSessionId = sessionId || await ensureOpenCodeSession();
+    const result = await submitOpenCodePrompt(activeSessionId, message, {
+      visualize: isVizRequest(message),
     });
 
     const vizSpec = extractVizSpec(result.text);
     const assistantText = stripVizSpec(result.text);
-    const visualization = vizSpec ? await renderVisualizationSpec(vizSpec, filePath || undefined) : null;
+    const visualization = vizSpec ? await renderVisualizationSpec(vizSpec, undefined) : null;
 
     res.json({
       ...result,
       text: assistantText,
       vizSpec,
       visualization,
+      sessionId: activeSessionId,
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
