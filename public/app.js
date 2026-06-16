@@ -1,24 +1,14 @@
-const opencodeFrame = document.getElementById('opencode-frame');
+const chatForm = document.getElementById('chat-form');
+const chatInput = document.getElementById('chat-input');
+const chatLog = document.getElementById('chat-log');
 const opencodeStatus = document.getElementById('opencode-status');
-const visualizeNext = document.getElementById('visualize-next');
-const visualizeMode = document.getElementById('visualize-mode');
+const vizStatus = document.getElementById('viz-status');
 const vizRoot = document.getElementById('viz-root');
 const vizMeta = document.getElementById('viz-meta');
 
-const VIZ_PROMPT = [
-  'Wenn die Aufgabe eine Visualisierung, Tabelle, ein Diagramm oder eine andere strukturierte Ausgabe verlangt, antworte zusätzlich mit genau einem fenced code block ```vizjson```.',
-  'Das JSON darin muss valide sein.',
-  'Erlaubte Typen: table, tree, bar, pie, python.',
-  'Für type=table: {"type":"table","title":"...","rows":[{"col":1}]}',
-  'Für type=tree: {"type":"tree","title":"...","tree":{}}',
-  'Für type=bar oder pie: {"type":"bar|pie","title":"...","data":[{"label":"A","value":1}]}',
-  'Für type=python: {"type":"python","title":"...","code":"...","output":"svg"}',
-  'Wenn keine Visualisierung nötig ist, antworte normal ohne vizjson-Block.',
-].join(' ');
-
 const state = {
-  visualizeNext: false,
-  opencodePatched: false,
+  sessionId: '',
+  busy: false,
 };
 
 function escapeHtml(value) {
@@ -31,100 +21,22 @@ function escapeHtml(value) {
 }
 
 function setBusy(isBusy) {
-  opencodeStatus.textContent = isBusy ? 'arbeitet ...' : 'bereit';
+  state.busy = isBusy;
+  opencodeStatus.textContent = isBusy ? 'arbeitet ...' : state.sessionId ? 'verbunden' : 'bereit';
+  chatInput.disabled = isBusy;
+  chatForm.querySelector('button[type="submit"]').disabled = isBusy;
 }
 
 function setMeta(text) {
   vizMeta.textContent = text;
 }
 
-function setVisualizationMode(active) {
-  state.visualizeNext = active;
-  visualizeMode.textContent = active ? 'wartet auf nächsten prompt' : 'bereit';
-  visualizeMode.classList.toggle('active', active);
-  visualizeNext.setAttribute('aria-pressed', String(active));
+function setVizStatus(text) {
+  vizStatus.textContent = text;
 }
 
-function patchOpenCodeFetch() {
-  if (state.opencodePatched) return;
-
-  let win;
-  try {
-    win = opencodeFrame.contentWindow;
-    if (!win) return;
-    void win.location.href;
-  } catch {
-    return;
-  }
-
-  try {
-    const originalFetch = win.fetch?.bind(win);
-    if (originalFetch) {
-      win.fetch = async (input, init = {}) => {
-        if (state.visualizeNext) {
-          const url = typeof input === 'string' ? input : input?.url || '';
-          if (/\/session\/[^/]+\/(message|prompt_async)/.test(url)) {
-            let bodyText = '';
-            if (typeof init.body === 'string') {
-              bodyText = init.body;
-            } else if (init.body instanceof URLSearchParams) {
-              bodyText = init.body.toString();
-            } else if (input instanceof Request) {
-              bodyText = await input.clone().text();
-            }
-
-            if (bodyText) {
-              try {
-                const payload = JSON.parse(bodyText);
-                const system = String(payload.system || '').trim();
-                payload.system = system ? `${system}\n\n${VIZ_PROMPT}` : VIZ_PROMPT;
-                init = { ...init, body: JSON.stringify(payload) };
-                setVisualizationMode(false);
-                setMeta('Visualisierung für den nächsten OpenCode-Prompt ist aktiv.');
-              } catch {
-                // leave request unchanged
-              }
-            }
-          }
-        }
-
-        return originalFetch(input, init);
-      };
-    }
-
-    const xhrProto = win.XMLHttpRequest?.prototype;
-    if (xhrProto && !xhrProto.__vizPatched) {
-      const originalOpen = xhrProto.open;
-      const originalSend = xhrProto.send;
-      xhrProto.open = function (...args) {
-        this.__vizUrl = String(args[1] || '');
-        return originalOpen.apply(this, args);
-      };
-      xhrProto.send = function (body) {
-        if (state.visualizeNext && /\/session\/[^/]+\/(message|prompt_async)/.test(String(this.__vizUrl || ''))) {
-          try {
-            const payload = typeof body === 'string' ? JSON.parse(body) : null;
-            if (payload && typeof payload === 'object') {
-              const system = String(payload.system || '').trim();
-              payload.system = system ? `${system}\n\n${VIZ_PROMPT}` : VIZ_PROMPT;
-              body = JSON.stringify(payload);
-              setVisualizationMode(false);
-              setMeta('Visualisierung für den nächsten OpenCode-Prompt ist aktiv.');
-            }
-          } catch {
-            // leave request unchanged
-          }
-        }
-        return originalSend.call(this, body);
-      };
-      xhrProto.__vizPatched = true;
-    }
-
-    state.opencodePatched = true;
-    setMeta('OpenCode ist verbunden.');
-  } catch {
-    // same-origin hook not ready yet
-  }
+function shouldVisualize(message) {
+  return /visual|diagram|chart|plot|graph|graf|tabelle|table|tree|baum|pie|balken|heatmap|matrix|map|render|viz|dashboard/i.test(message);
 }
 
 function renderVisualization(result) {
@@ -132,6 +44,7 @@ function renderVisualization(result) {
     if (result.visualization.html) {
       vizRoot.innerHTML = result.visualization.html;
       setMeta(`${result.visualization.kind || 'visual'} · ${result.visualization.title || 'OpenCode'}`);
+      setVizStatus('aktualisiert');
       return;
     }
 
@@ -145,31 +58,106 @@ function renderVisualization(result) {
         vizRoot.innerHTML = `<pre>${escapeHtml(artifact.content || result.visualization.stdout || result.visualization.stderr || '')}</pre>`;
       }
       setMeta(`${result.visualization.kind || 'python'} · ${result.visualization.title || 'OpenCode'}`);
+      setVizStatus('aktualisiert');
       return;
     }
   }
 
   if (result.text) {
-    vizRoot.innerHTML = `<pre>${escapeHtml(result.text)}</pre>`;
+    vizRoot.innerHTML = '<div class="muted">Keine Visualisierung erzeugt.</div>';
     setMeta('OpenCode hat eine Textantwort geliefert.');
+    setVizStatus('leer');
     return;
   }
 
   vizRoot.innerHTML = '<div class="muted">Keine Ausgabe erhalten.</div>';
   setMeta('Keine Visualisierung erzeugt.');
+  setVizStatus('leer');
 }
 
-opencodeFrame.addEventListener('load', () => {
-  opencodeStatus.textContent = 'bereit';
-  state.opencodePatched = false;
-  patchOpenCodeFetch();
+function renderMessage(role, text) {
+  const item = document.createElement('article');
+  item.className = `message ${role}`;
+
+  const label = document.createElement('div');
+  label.className = 'message-label';
+  label.textContent = role === 'user' ? 'Du' : 'OpenCode';
+
+  const body = document.createElement('div');
+  body.className = 'message-body';
+  body.innerHTML = escapeHtml(text).replaceAll('\n', '<br>');
+
+  item.append(label, body);
+  chatLog.append(item);
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+function syncComposerHeight() {
+  chatInput.style.height = 'auto';
+  chatInput.style.height = `${Math.min(chatInput.scrollHeight, 180)}px`;
+}
+
+async function sendMessage(message) {
+  const body = {
+    message,
+    sessionId: state.sessionId,
+  };
+
+  if (shouldVisualize(message)) {
+    setVizStatus('erkennt visuell');
+  }
+
+  setBusy(true);
+  renderMessage('user', message);
+
+  try {
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || 'Unbekannter Fehler');
+    }
+
+    state.sessionId = data.sessionId || state.sessionId;
+    opencodeStatus.textContent = state.sessionId ? 'verbunden' : 'bereit';
+
+    const assistantText = data.text || (data.visualization ? 'Visualisierung erzeugt.' : 'Antwort erhalten.');
+    renderMessage('assistant', assistantText || '');
+    renderVisualization(data);
+  } catch (error) {
+    renderMessage('assistant', `Fehler: ${error.message}`);
+    vizRoot.innerHTML = '<div class="muted">Keine Visualisierung verfügbar.</div>';
+    setMeta('Fehler beim Ausführen des OpenCode-Prompts.');
+    setVizStatus('fehler');
+  } finally {
+    setBusy(false);
+    chatInput.focus();
+    syncComposerHeight();
+  }
+}
+
+chatForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const message = chatInput.value.trim();
+  if (!message || state.busy) return;
+  chatInput.value = '';
+  syncComposerHeight();
+  void sendMessage(message);
 });
 
-visualizeNext.addEventListener('click', () => {
-  setVisualizationMode(!state.visualizeNext);
-  setMeta(state.visualizeNext ? 'Der nächste Prompt im OpenCode-Fenster wird als Visualisierung behandelt.' : 'Visualisierungsmodus ist aus.');
-  patchOpenCodeFetch();
+chatInput.addEventListener('input', syncComposerHeight);
+chatInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    chatForm.requestSubmit();
+  }
 });
 
-setVisualizationMode(false);
-setMeta('Bereit für den nächsten Prompt.');
+setBusy(false);
+setVizStatus('wartet');
+setMeta('Bereit für eine Visualisierung oder eine normale Antwort.');
+syncComposerHeight();

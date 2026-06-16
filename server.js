@@ -5,87 +5,16 @@ import path from 'node:path';
 import process from 'node:process';
 import readline from 'node:readline';
 import { randomUUID } from 'node:crypto';
-import { Readable } from 'node:stream';
 
 const app = express();
 const ROOT = process.cwd();
 const PORT = Number(process.env.PORT || 3000);
-const OPENCODE_WEB_PORT = Number(process.env.OPENCODE_WEB_PORT || 4096);
-const OPENCODE_WEB_URL = `http://127.0.0.1:${OPENCODE_WEB_PORT}`;
 const VIZ_ROOT = path.join(ROOT, 'tmp', 'viz');
 const MAX_INPUT_BYTES = 2 * 1024 * 1024;
 const PYTHON_TIMEOUT_MS = 20000;
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static('public'));
-
-async function proxyOpenCode(req, res) {
-  try {
-    const upstreamUrl = new URL(req.originalUrl.replace(/^\/opencode/, '') || '/', OPENCODE_WEB_URL);
-    const headers = new Headers();
-    for (const [key, value] of Object.entries(req.headers)) {
-      if (!value) continue;
-      if (['host', 'connection', 'content-length'].includes(key.toLowerCase())) continue;
-      if (Array.isArray(value)) {
-        for (const entry of value) headers.append(key, entry);
-      } else {
-        headers.set(key, value);
-      }
-    }
-
-    const init = {
-      method: req.method,
-      headers,
-      redirect: 'manual',
-    };
-
-    if (!['GET', 'HEAD'].includes(req.method)) {
-      init.body = req;
-      init.duplex = 'half';
-    }
-
-    const upstream = await fetch(upstreamUrl, init);
-    res.status(upstream.status);
-
-    upstream.headers.forEach((value, key) => {
-      if (['transfer-encoding', 'connection'].includes(key.toLowerCase())) return;
-      res.setHeader(key, value);
-    });
-
-    if (!upstream.body) {
-      res.end();
-      return;
-    }
-
-    Readable.fromWeb(upstream.body).pipe(res);
-  } catch (error) {
-    res.status(502).send(error.message);
-  }
-}
-
-app.use('/opencode', proxyOpenCode);
-
-async function ensureOpenCodeWeb() {
-  try {
-    const response = await fetch(`${OPENCODE_WEB_URL}/api/health`);
-    if (response.ok) return;
-  } catch {
-    // start below
-  }
-
-  const child = spawn('opencode', ['web', '--port', String(OPENCODE_WEB_PORT), '--hostname', '127.0.0.1', '--pure'], {
-    cwd: ROOT,
-    env: process.env,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    detached: true,
-  });
-
-  child.stdout.on('data', (chunk) => process.stdout.write(chunk));
-  child.stderr.on('data', (chunk) => process.stderr.write(chunk));
-  child.unref();
-}
-
-void ensureOpenCodeWeb();
 
 const IGNORED_DIRS = new Set(['.git', '.secrets', 'node_modules', 'playwright-report', 'test-results', 'tmp']);
 

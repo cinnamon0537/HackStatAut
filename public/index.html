@@ -12,11 +12,21 @@
         <div class="panel-header">
           <div>
             <div class="eyebrow">ChatWithYourData</div>
-            <h1>OpenCode im Web</h1>
+            <h1>Chat</h1>
           </div>
           <div class="status-pill" id="opencode-status">startet ...</div>
         </div>
-        <iframe id="opencode-frame" class="opencode-frame" src="/opencode/" title="OpenCode Web"></iframe>
+        <div id="chat-log" class="chat-log" aria-live="polite"></div>
+
+        <form id="chat-form" class="composer" autocomplete="off">
+          <textarea
+            id="chat-input"
+            class="chat-input"
+            rows="1"
+            placeholder="Schreib eine Frage oder fordere eine Visualisierung an..."
+          ></textarea>
+          <button class="send-button" type="submit">Senden</button>
+        </form>
       </section>
 
       <section class="panel viz-panel">
@@ -25,13 +35,10 @@
             <div class="eyebrow">Ausgabe</div>
             <h1>Visualisierung</h1>
           </div>
+          <div class="status-pill subtle" id="viz-status">wartet</div>
         </div>
 
         <div class="viz-shell">
-          <div class="viz-actions">
-            <div class="status-pill" id="visualize-mode">normal</div>
-            <button id="visualize-next" class="ghost" type="button">Visualisieren</button>
-          </div>
           <div id="viz-meta" class="viz-meta">Bereit für den nächsten Prompt.</div>
           <div id="viz-root" class="viz-root">
             <div class="muted">Hier erscheinen Visualisierungen von OpenCode.</div>
