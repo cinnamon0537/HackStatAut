@@ -481,7 +481,6 @@ h2 { font-size: 14px; }
 
 @media (max-width: 720px) {
   .app-shell { padding: 0; }
-  .topbar { align-items: flex-start; flex-direction: column; }
   .composer { grid-template-columns: 1fr; }
   .send-button { min-height: 40px; }
   .bar { grid-template-columns: 1fr; }

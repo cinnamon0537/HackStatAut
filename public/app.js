@@ -282,6 +282,4 @@ chatInput.addEventListener('keydown', (event) => {
 });
 
 setBusy(false);
-setVizStatus('waiting', 'idle');
-setMeta('Ready for a visualization or a normal response.');
 syncComposerHeight();
