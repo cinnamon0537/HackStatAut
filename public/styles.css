@@ -449,14 +449,6 @@ h2 { font-size: 14px; }
   height: auto;
 }
 
-.demo-pie {
-  gap: 12px;
-}
-
-.demo-pie-chart {
-  max-width: 280px;
-}
-
 .pie-slice {
   stroke: #101010;
   stroke-width: 2;
@@ -472,21 +464,6 @@ h2 { font-size: 14px; }
 .pie-center-subtitle {
   fill: var(--muted);
   font-size: 11px;
-}
-
-.demo-chart {
-  gap: 10px;
-}
-
-.demo-svg {
-  width: 100%;
-  height: auto;
-  display: block;
-}
-
-.demo-grid-line {
-  stroke: rgba(255, 255, 255, 0.08);
-  stroke-width: 1;
 }
 
 .pie-legend {

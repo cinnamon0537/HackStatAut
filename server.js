@@ -72,6 +72,66 @@ function buildQuery(params = {}) {
   return search.toString();
 }
 
+function isDemoVisualizationRequest(message) {
+  return /\bdemo\s+(grafik|visualisierung|visualization|chart)\b/i.test(String(message || ''))
+    || /\bdemo\s+chart\b/i.test(String(message || ''));
+}
+
+async function buildDemoVisualizationResult(message, sessionId = '') {
+  const demo = await runDemoVisualizationPrompt(message);
+  const visualizations = [];
+  const vizSpecs = [];
+
+  for (const item of demo.results || []) {
+    const specs = extractVizSpecs(item.text);
+    for (const spec of specs) {
+      const visualization = await renderVisualizationSpec(spec, undefined);
+      if (!visualization) continue;
+      vizSpecs.push(spec);
+      visualizations.push(visualization);
+    }
+  }
+
+  return {
+    code: 0,
+    text: stripVizSpec(demo.text || ''),
+    stderr: '',
+    sessionId: sessionId || demo.sessionId || '',
+    vizSpec: vizSpecs[0] || null,
+    vizSpecs,
+    visualization: visualizations[0] || null,
+    visualizations,
+  };
+}
+
+function buildOpenCodeMessage(message) {
+  const text = String(message || '').trim();
+  if (!text) return text;
+  return text;
+}
+
+async function runDemoVisualizationPrompt(message) {
+  const prompt = [
+    'Erzeuge genau zwei `vizjson`-Blöcke und keinen Code sonst.',
+    '1. bar chart mit Titel "Demo Values" und Kategorien A, B, C.',
+    '2. pie chart mit Titel "Demo Distribution".',
+    'Antworte kurz mit "Demo-Visualisierung erstellt."',
+    `User request: ${message}`,
+  ].join(' ');
+  const result = await runOpenCode({ message: prompt });
+
+  return {
+    assistantId: result.assistantId || '',
+    userMessageId: result.userMessageId || '',
+    text: result.text || 'Demo-Visualisierung erstellt.',
+    progressText: result.progressText || '',
+    detail: null,
+    sessionId: result.sessionId || '',
+    combined: true,
+    results: [result],
+  };
+}
+
 async function opencodeRequest(pathname, { method = 'GET', body, query } = {}) {
   const url = new URL(pathname, OPENCODE_WEB_URL);
   const search = buildQuery(query);
@@ -129,6 +189,23 @@ async function ensureOpenCodeSession() {
   }
 }
 
+async function createOpenCodeSession() {
+  const created = await opencodeRequest('/api/session', {
+    method: 'POST',
+    body: { location: { directory: ROOT } },
+  });
+  const sessionId = created?.data?.id || created?.id || '';
+  if (!sessionId) throw new Error('OpenCode session could not be created');
+
+  await opencodeRequest(`/session/${sessionId}/init`, {
+    method: 'POST',
+    query: { directory: ROOT },
+    body: { providerID: OPENCODE_MODEL.providerID, modelID: OPENCODE_MODEL.modelID, messageID: makeMessageId() },
+  });
+
+  return sessionId;
+}
+
 function readMessageText(messageDetail) {
   return (messageDetail?.parts || [])
     .filter((part) => part?.type === 'text' && typeof part.text === 'string')
@@ -175,7 +252,7 @@ function normalizeOpenCodeEvent(event) {
   };
 }
 
-async function consumeOpenCodePrompt(sessionId, message, { visualize = false, timeoutMs = 120000, onEvent } = {}) {
+async function consumeOpenCodePrompt(sessionId, message, { visualize = false, systemPrompt = '', timeoutMs = 120000, onEvent } = {}) {
   const userMessageId = makeMessageId();
   const eventStreamPromise = fetch(`${OPENCODE_WEB_URL}/api/event`);
   const body = {
@@ -186,7 +263,9 @@ async function consumeOpenCodePrompt(sessionId, message, { visualize = false, ti
     parts: [{ type: 'text', text: message }],
   };
 
-  if (visualize) {
+  if (systemPrompt) {
+    body.system = systemPrompt;
+  } else if (visualize) {
     body.system = VIZ_PROMPT;
   }
 
@@ -272,19 +351,22 @@ function isVizRequest(message) {
   return /visual|diagram|chart|plot|graf|tabelle|table|tree|baum|pie|balken|render|viz/i.test(message);
 }
 
-function extractVizSpec(text) {
-  const match = text.match(/```vizjson\s*([\s\S]*?)```/i);
-  if (!match) return null;
-  try {
-    const parsed = JSON.parse(match[1].trim());
-    return parsed && typeof parsed === 'object' ? parsed : null;
-  } catch {
-    return null;
+function extractVizSpecs(text) {
+  const specs = [];
+  const blocks = String(text || '').matchAll(/```vizjson\s*([\s\S]*?)```/gi);
+  for (const match of blocks) {
+    try {
+      const parsed = JSON.parse(match[1].trim());
+      if (parsed && typeof parsed === 'object') specs.push(parsed);
+    } catch {
+      // ignore invalid blocks
+    }
   }
+  return specs;
 }
 
 function stripVizSpec(text) {
-  return text.replace(/```vizjson\s*[\s\S]*?```/i, '').trim();
+  return String(text || '').replace(/```vizjson\s*[\s\S]*?```/gi, '').trim();
 }
 
 const INTERNAL_OPEN_CODE_EVENT_TYPES = new Set([
@@ -572,10 +654,10 @@ async function renderVisualizationSpec(spec, filePath) {
   }
 
   const type = String(spec.type || '').toLowerCase();
-  if (type === 'table') return { kind: 'table', html: renderTableHtml(spec.rows, spec.title) };
-  if (type === 'tree') return { kind: 'tree', html: buildTreeHtml(spec.tree, spec.title) };
-  if (type === 'bar') return { kind: 'bar', html: buildBarSvg(spec.data, spec.title) };
-  if (type === 'pie') return { kind: 'pie', html: buildPieSvg(spec.data, spec.title) };
+  if (type === 'table') return { kind: 'table', title: spec.title, html: renderTableHtml(spec.rows, spec.title) };
+  if (type === 'tree') return { kind: 'tree', title: spec.title, html: buildTreeHtml(spec.tree, spec.title) };
+  if (type === 'bar') return { kind: 'bar', title: spec.title, html: buildBarSvg(spec.data, spec.title) };
+  if (type === 'pie') return { kind: 'pie', title: spec.title, html: buildPieSvg(spec.data, spec.title) };
   if (type === 'python') return runPythonVisualization(spec, filePath);
 
   return null;
@@ -707,22 +789,42 @@ app.post('/api/chat/stream', async (req, res) => {
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders?.();
 
+    const useFreshSession = isDemoVisualizationRequest(message);
+    if (useFreshSession) {
+      const result = await buildDemoVisualizationResult(message, sessionId || '');
+      send({ type: 'session', sessionId: result.sessionId || sessionId || '' });
+      send({
+        type: 'final',
+        ...result,
+        sessionId: result.sessionId || sessionId || '',
+      });
+      finished = true;
+      res.end();
+      return;
+    }
+
     const result = await runOpenCode({
       message,
       sessionId: sessionId || undefined,
       onEvent: (event) => send(event),
     });
 
-    const vizSpec = extractVizSpec(result.text);
+    const vizSpecs = extractVizSpecs(result.text);
     const assistantText = stripVizSpec(result.text);
-    const visualization = vizSpec ? await renderVisualizationSpec(vizSpec, undefined) : null;
+    const visualizations = [];
+    for (const spec of vizSpecs) {
+      const visualization = await renderVisualizationSpec(spec, undefined);
+      if (visualization) visualizations.push(visualization);
+    }
 
     send({
       type: 'final',
       ...result,
       text: assistantText,
-      vizSpec,
-      visualization,
+      vizSpec: vizSpecs[0] || null,
+      vizSpecs,
+      visualization: visualizations[0] || null,
+      visualizations,
       sessionId: result.sessionId || sessionId || '',
     });
     finished = true;
@@ -740,7 +842,7 @@ app.post('/api/chat/stream', async (req, res) => {
 
 function runOpenCode({ message, sessionId, filePath, onEvent } = {}) {
   return new Promise((resolve, reject) => {
-    const args = ['run', message, '--format', 'json', '--dir', ROOT];
+    const args = ['run', buildOpenCodeMessage(message), '--format', 'json', '--dir', ROOT];
     if (sessionId) {
       args.push('--session', sessionId);
     }
@@ -806,17 +908,30 @@ app.post('/api/chat', async (req, res) => {
     const sessionId = String(req.body?.sessionId || '').trim();
     if (!message) return res.status(400).json({ error: 'Message missing' });
 
+    const useFreshSession = isDemoVisualizationRequest(message);
+    if (useFreshSession) {
+      const result = await buildDemoVisualizationResult(message, sessionId || '');
+      res.json(result);
+      return;
+    }
+
     const result = await runOpenCode({ message, sessionId: sessionId || undefined });
 
-    const vizSpec = extractVizSpec(result.text);
+    const vizSpecs = extractVizSpecs(result.text);
     const assistantText = stripVizSpec(result.text);
-    const visualization = vizSpec ? await renderVisualizationSpec(vizSpec, undefined) : null;
+    const visualizations = [];
+    for (const spec of vizSpecs) {
+      const visualization = await renderVisualizationSpec(spec, undefined);
+      if (visualization) visualizations.push(visualization);
+    }
 
     res.json({
       ...result,
       text: assistantText,
-      vizSpec,
-      visualization,
+      vizSpec: vizSpecs[0] || null,
+      vizSpecs,
+      visualization: visualizations[0] || null,
+      visualizations,
       sessionId: result.sessionId || sessionId || '',
     });
   } catch (error) {

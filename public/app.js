@@ -56,110 +56,98 @@ function setStreamStatus(text, tone = 'idle') {
   setStatusPill(streamStatus, text, tone);
 }
 
-function isDemoVisualizationRequest(message) {
-  return /\bdemo\s+(grafik|chart|visualisierung|visualization)\b/i.test(message)
-    || /\bdemo\s+chart\b/i.test(message);
-}
-
-function renderDemoVisualization() {
-  const barData = [
-    { label: 'A', value: 32 },
-    { label: 'B', value: 24 },
-    { label: 'C', value: 18 },
-  ];
-  const pieData = [
-    { label: 'North', value: 40 },
-    { label: 'East', value: 25 },
-    { label: 'South', value: 20 },
-    { label: 'West', value: 15 },
-  ];
-  const barMax = Math.max(...barData.map((item) => item.value), 1);
-  const pieTotal = pieData.reduce((sum, item) => sum + item.value, 0);
-  const colors = ['#ffbf4d', '#ff9d00', '#f472b6', '#84ccff'];
-
-  const pieSlices = [];
-  let currentAngle = 0;
-  const polarToCartesian = (cx, cy, radius, angleDeg) => {
-    const angleRad = (angleDeg - 90) * (Math.PI / 180);
-    return {
-      x: cx + radius * Math.cos(angleRad),
-      y: cy + radius * Math.sin(angleRad),
-    };
-  };
-
-  for (const [index, item] of pieData.entries()) {
-    const sliceAngle = (item.value / pieTotal) * 360;
-    const startAngle = currentAngle;
-    const endAngle = currentAngle + sliceAngle;
-    currentAngle = endAngle;
-    const start = polarToCartesian(140, 140, 104, endAngle);
-    const end = polarToCartesian(140, 140, 104, startAngle);
-    const largeArc = endAngle - startAngle <= 180 ? '0' : '1';
-    pieSlices.push(`<path d="M 140 140 L ${start.x} ${start.y} A 104 104 0 ${largeArc} 0 ${end.x} ${end.y} Z" fill="${colors[index % colors.length]}"></path>`);
-  }
-
-  vizRoot.innerHTML = `
-    <article class="artifact-card demo-card">
-      <div class="artifact-title">Demo Bar Chart</div>
-      <div class="chart">
-        ${barData.map((item) => `
-          <div class="bar">
-            <div>${escapeHtml(item.label)}</div>
-            <div class="bar-track"><div class="bar-fill" style="width:${(item.value / barMax) * 100}%"></div></div>
-            <div class="muted">${item.value}</div>
-          </div>
-        `).join('')}
-      </div>
-    </article>
-    <article class="artifact-card demo-card">
-      <div class="artifact-title">Demo Pie Chart</div>
-      <div class="pie-wrap">
-        <svg viewBox="0 0 280 280" class="pie-chart" role="img" aria-label="Demo pie chart">
-          <rect x="0" y="0" width="280" height="280" rx="16" fill="#0f0f0f" stroke="#262626"></rect>
-          ${pieSlices.join('')}
-        </svg>
-        <div class="pie-legend">
-          ${pieData.map((item, index) => `
-            <div class="pie-legend-row">
-              <span class="pie-dot" style="background:${colors[index % colors.length]}"></span>
-              <span class="pie-legend-label">${item.label}</span>
-              <span class="pie-legend-value">${Math.round((item.value / pieTotal) * 100)}%</span>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-    </article>
-  `;
-  setMeta('Demo visualizations created.');
-  setVizStatus('demo', 'ok');
-}
-
 function shouldVisualize(message) {
   return /visual|diagram|chart|plot|graph|graf|tabelle|table|tree|baum|pie|balken|heatmap|matrix|map|render|viz|dashboard/i.test(message);
 }
 
+function buildDemoVisualizationHtml() {
+  const values = [
+    { label: 'A', value: 12, color: '#ff9d00' },
+    { label: 'B', value: 8, color: '#7dbb7d' },
+    { label: 'C', value: 15, color: '#ffbf4d' },
+  ];
+  const max = Math.max(...values.map((item) => item.value), 1);
+
+  return `
+    <div class="artifact-card">
+      <div class="artifact-title">Demo Values</div>
+      <svg viewBox="0 0 360 220" style="width:100%;height:auto;display:block" role="img" aria-label="Demo bar chart">
+        <line x1="44" y1="22" x2="44" y2="176" stroke="#4a4a4a" stroke-width="1.2"></line>
+        <line x1="44" y1="176" x2="326" y2="176" stroke="#4a4a4a" stroke-width="1.2"></line>
+        ${values.map((item, index) => {
+          const barHeight = Math.round((item.value / max) * 118);
+          const x = 74 + index * 86;
+          const y = 176 - barHeight;
+          return `
+            <g>
+              <rect x="${x}" y="${y}" width="42" height="${barHeight}" rx="4" fill="${item.color}"></rect>
+              <text x="${x + 21}" y="196" text-anchor="middle" fill="#c8c8c8" font-size="11">${escapeHtml(item.label)}</text>
+              <text x="${x + 21}" y="${y - 8}" text-anchor="middle" fill="#f2f2f2" font-size="11">${item.value}</text>
+            </g>
+          `;
+        }).join('')}
+      </svg>
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;">
+        ${values.map((item) => `
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #2a2a2a;border-radius:4px;background:#121212;">
+            <span style="width:10px;height:10px;border-radius:2px;flex:0 0 auto;background:${item.color}"></span>
+            <span style="color:#c8c8c8">${escapeHtml(item.label)}</span>
+            <strong style="margin-left:auto;font-size:12px;color:#f2f2f2">${item.value}</strong>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function renderLocalDemoVisualization() {
+  vizRoot.innerHTML = buildDemoVisualizationHtml();
+  setMeta('Demo-Grafik · Beispielansicht');
+  setVizStatus('bereit', 'ok');
+}
+
+function renderVisualizationItem(visualization) {
+  if (!visualization) return false;
+
+  if (visualization.html) {
+    vizRoot.insertAdjacentHTML('beforeend', visualization.html);
+    return true;
+  }
+
+  if (visualization.artifact) {
+    const { artifact } = visualization;
+    if (artifact.mime === 'image/png' || artifact.mime === 'image/svg+xml') {
+      vizRoot.insertAdjacentHTML('beforeend', `<img src="/api/raw?path=${encodeURIComponent(artifact.path)}" alt="${escapeHtml(artifact.name)}" class="viz-image">`);
+    } else if (artifact.mime === 'text/html') {
+      vizRoot.insertAdjacentHTML('beforeend', `<iframe sandbox srcdoc="${escapeHtml(artifact.content || '')}" class="viz-frame"></iframe>`);
+    } else {
+      vizRoot.insertAdjacentHTML('beforeend', `<pre>${escapeHtml(artifact.content || visualization.stdout || visualization.stderr || '')}</pre>`);
+    }
+    return true;
+  }
+
+  return false;
+}
+
 function renderVisualization(result) {
-  if (result.visualization) {
-    if (result.visualization.html) {
-      vizRoot.innerHTML = result.visualization.html;
-      setMeta(`${result.visualization.kind || 'visual'} · ${result.visualization.title || 'ChatWithYourData'}`);
-      setVizStatus('aktualisiert', 'ok');
-      return;
+  const visualizations = Array.isArray(result.visualizations) && result.visualizations.length
+    ? result.visualizations
+    : result.visualization
+      ? [result.visualization]
+      : [];
+
+  if (visualizations.length) {
+    vizRoot.innerHTML = '';
+    let count = 0;
+    for (const visualization of visualizations) {
+      if (renderVisualizationItem(visualization)) count += 1;
     }
 
-    if (result.visualization.artifact) {
-      const { artifact } = result.visualization;
-      if (artifact.mime === 'image/png' || artifact.mime === 'image/svg+xml') {
-        vizRoot.innerHTML = `<img src="/api/raw?path=${encodeURIComponent(artifact.path)}" alt="${escapeHtml(artifact.name)}" class="viz-image">`;
-      } else if (artifact.mime === 'text/html') {
-        vizRoot.innerHTML = `<iframe sandbox srcdoc="${escapeHtml(artifact.content || '')}" class="viz-frame"></iframe>`;
-      } else {
-        vizRoot.innerHTML = `<pre>${escapeHtml(artifact.content || result.visualization.stdout || result.visualization.stderr || '')}</pre>`;
-      }
-      setMeta(`${result.visualization.kind || 'python'} · ${result.visualization.title || 'ChatWithYourData'}`);
-      setVizStatus('aktualisiert', 'ok');
-      return;
-    }
+    const metaTitle = visualizations[0]?.title || 'ChatWithYourData';
+    const metaKind = visualizations.length > 1 ? `${visualizations.length} visualizations` : (visualizations[0]?.kind || 'visual');
+    setMeta(`${metaKind} · ${metaTitle}`);
+    setVizStatus(count ? 'aktualisiert' : 'empty', count ? 'ok' : 'idle');
+    return;
   }
 
   if (result.text) {
@@ -310,15 +298,6 @@ async function sendMessage(message) {
   setBusy(true);
   renderUserMessage(message);
 
-  if (isDemoVisualizationRequest(message)) {
-    finishAssistantText('Demo-Visualisierung erstellt.');
-    renderDemoVisualization();
-    setBusy(false);
-    chatInput.focus();
-    syncComposerHeight();
-    return;
-  }
-
   try {
     const response = await fetch('/api/chat', {
       method: 'POST',
@@ -369,3 +348,4 @@ chatInput.addEventListener('keydown', (event) => {
 
 setBusy(false);
 syncComposerHeight();
+renderLocalDemoVisualization();
