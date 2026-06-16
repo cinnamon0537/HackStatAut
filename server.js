@@ -287,6 +287,63 @@ function stripVizSpec(text) {
   return text.replace(/```vizjson\s*[\s\S]*?```/i, '').trim();
 }
 
+const INTERNAL_OPEN_CODE_EVENT_TYPES = new Set([
+  'session.updated',
+  'message.updated',
+  'message.created',
+  'session.created',
+  'permission.updated',
+  'file.edited',
+  'storage.write',
+]);
+
+function getRunEventText(event) {
+  const part = event?.part || {};
+  return typeof part.text === 'string'
+    ? part.text
+    : typeof part.message === 'string'
+      ? part.message
+      : typeof event?.text === 'string'
+        ? event.text
+        : typeof event?.message === 'string'
+          ? event.message
+          : '';
+}
+
+function isInternalOpenCodeEvent(event) {
+  const rawType = String(event?.type || '').toLowerCase();
+  return !rawType || INTERNAL_OPEN_CODE_EVENT_TYPES.has(rawType);
+}
+
+function extractUserFacingContent(event) {
+  if (!event || isInternalOpenCodeEvent(event)) return null;
+
+  const rawType = String(event?.type || '').toLowerCase();
+  const text = getRunEventText(event);
+
+  if (rawType === 'error') {
+    return { type: 'error', label: 'Error', text: text || 'Error' };
+  }
+
+  if (rawType.includes('command') || rawType.includes('shell') || rawType.includes('exec')) {
+    return { type: 'command', label: 'Command', text: text || rawType };
+  }
+
+  if (rawType.includes('tool') || rawType.includes('file') || rawType.includes('read')) {
+    return { type: 'tool', label: 'Tool', text: text || rawType };
+  }
+
+  if (rawType.includes('stdout') || rawType.includes('stderr') || rawType.includes('output')) {
+    return { type: 'output', label: 'Output', text };
+  }
+
+  if (rawType === 'text') {
+    return { type: 'text', label: 'Assistant', text };
+  }
+
+  return null;
+}
+
 function renderTableHtml(rows, title = 'Tabelle') {
   const data = Array.isArray(rows) ? rows : [];
   const headers = [...new Set(data.flatMap((row) => Object.keys(row || {})))];
@@ -644,18 +701,16 @@ app.post('/api/chat/stream', async (req, res) => {
     const sessionId = String(req.body?.sessionId || '').trim();
     if (!message) return res.status(400).json({ error: 'Message missing' });
 
-    const activeSessionId = sessionId || await ensureOpenCodeSession();
     res.status(200);
     res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders?.();
 
-    send({ type: 'session', sessionId: activeSessionId });
-
-    const result = await consumeOpenCodePrompt(activeSessionId, message, {
-      visualize: isVizRequest(message),
-      onEvent: (event) => send({ type: 'event', event }),
+    const result = await runOpenCode({
+      message,
+      sessionId: sessionId || undefined,
+      onEvent: (event) => send(event),
     });
 
     const vizSpec = extractVizSpec(result.text);
@@ -668,7 +723,7 @@ app.post('/api/chat/stream', async (req, res) => {
       text: assistantText,
       vizSpec,
       visualization,
-      sessionId: activeSessionId,
+      sessionId: result.sessionId || sessionId || '',
     });
     finished = true;
     res.end();
@@ -683,7 +738,7 @@ app.post('/api/chat/stream', async (req, res) => {
   }
 });
 
-function runOpenCode({ message, sessionId, filePath }) {
+function runOpenCode({ message, sessionId, filePath, onEvent } = {}) {
   return new Promise((resolve, reject) => {
     const args = ['run', message, '--format', 'json', '--dir', ROOT];
     if (sessionId) {
@@ -702,8 +757,14 @@ function runOpenCode({ message, sessionId, filePath }) {
     const events = [];
     const rl = readline.createInterface({ input: child.stdout });
     let nextSessionId = sessionId || '';
+    let sessionEmitted = false;
     let text = '';
     let stderr = '';
+
+    if (sessionId) {
+      onEvent?.({ type: 'session', sessionId });
+      sessionEmitted = true;
+    }
 
     rl.on('line', (line) => {
       const trimmed = line.trim();
@@ -711,9 +772,17 @@ function runOpenCode({ message, sessionId, filePath }) {
       try {
         const event = JSON.parse(trimmed);
         events.push(event);
-        if (event.sessionID) nextSessionId = event.sessionID;
+        if (event.sessionID) {
+          nextSessionId = event.sessionID;
+          if (!sessionEmitted) {
+            onEvent?.({ type: 'session', sessionId: nextSessionId });
+            sessionEmitted = true;
+          }
+        }
         if (event.type === 'text' && event.part?.text) text += event.part.text;
         if (event.type === 'error' && event.part?.message) stderr += `${event.part.message}\n`;
+        const content = extractUserFacingContent(event);
+        if (content) onEvent?.(content);
       } catch {
         stderr += `${trimmed}\n`;
       }
@@ -737,10 +806,7 @@ app.post('/api/chat', async (req, res) => {
     const sessionId = String(req.body?.sessionId || '').trim();
     if (!message) return res.status(400).json({ error: 'Message missing' });
 
-    const activeSessionId = sessionId || await ensureOpenCodeSession();
-    const result = await submitOpenCodePrompt(activeSessionId, message, {
-      visualize: isVizRequest(message),
-    });
+    const result = await runOpenCode({ message, sessionId: sessionId || undefined });
 
     const vizSpec = extractVizSpec(result.text);
     const assistantText = stripVizSpec(result.text);
@@ -751,7 +817,7 @@ app.post('/api/chat', async (req, res) => {
       text: assistantText,
       vizSpec,
       visualization,
-      sessionId: activeSessionId,
+      sessionId: result.sessionId || sessionId || '',
     });
   } catch (error) {
     res.status(500).json({ error: error.message });

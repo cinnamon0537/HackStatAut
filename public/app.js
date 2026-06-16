@@ -1,7 +1,6 @@
 const chatForm = document.getElementById('chat-form');
 const chatInput = document.getElementById('chat-input');
 const chatLog = document.getElementById('chat-log');
-const activityLog = document.getElementById('activity-log');
 const connectionStatus = document.getElementById('connection-status');
 const streamStatus = document.getElementById('stream-status');
 const vizStatus = document.getElementById('viz-status');
@@ -127,40 +126,13 @@ function renderUserMessage(text) {
   scrollBottom(chatLog);
 }
 
-function ensureAssistantMessage() {
+function finishAssistantText(finalText) {
   hideChatIntro();
-  if (state.activeAssistant) return state.activeAssistant;
-
   const { card, body } = createCard('assistant', 'ChatWithYourData');
-  card.classList.add('assistant-stream');
-  body.className = 'event-body assistant-live';
-  body.innerHTML = '<span class="assistant-cursor">▍</span>';
+  body.innerHTML = escapeHtml(finalText).replaceAll('\n', '<br>');
+  card.classList.add('done');
   chatLog.append(card);
   scrollBottom(chatLog);
-
-  state.activeAssistant = {
-    card,
-    body,
-    text: '',
-  };
-
-  return state.activeAssistant;
-}
-
-function setAssistantText(nextText, { append = false } = {}) {
-  const assistant = ensureAssistantMessage();
-  assistant.text = append ? `${assistant.text}${nextText}` : nextText;
-  assistant.body.innerHTML = `${escapeHtml(assistant.text).replaceAll('\n', '<br>')}<span class="assistant-cursor">▍</span>`;
-  scrollBottom(chatLog);
-}
-
-function finishAssistantText(finalText) {
-  const assistant = ensureAssistantMessage();
-  assistant.text = finalText;
-  assistant.body.innerHTML = escapeHtml(finalText).replaceAll('\n', '<br>');
-  assistant.card.classList.add('done');
-  scrollBottom(chatLog);
-  state.activeAssistant = null;
 }
 
 function appendActivity(kind, title, text = '') {
@@ -169,8 +141,8 @@ function appendActivity(kind, title, text = '') {
   if (text) {
     body.innerHTML = escapeHtml(text).replaceAll('\n', '<br>');
   }
-  activityLog.append(card);
-  scrollBottom(activityLog);
+  chatLog.append(card);
+  scrollBottom(chatLog);
 }
 
 function classifyEvent(event) {
@@ -189,8 +161,6 @@ function classifyEvent(event) {
 }
 
 function resetRunUi() {
-  activityLog.innerHTML = '';
-  state.activeAssistant = null;
   vizRoot.innerHTML = '<div class="muted">Waiting for output ...</div>';
   setMeta('ChatWithYourData is processing the prompt.');
   setVizStatus('running', 'busy');
@@ -233,50 +203,6 @@ function handleStreamPayload(payload) {
     return;
   }
 
-  if (payload.type === 'event') {
-    const event = classifyEvent(payload.event);
-
-    if (event.type === 'text') {
-      setAssistantText(event.text, { append: true });
-      setStreamStatus('streaming', 'busy');
-      return;
-    }
-
-    if (event.type === 'assistant-final') {
-      finishAssistantText(state.activeAssistant?.text || event.text || 'Response received.');
-      setStreamStatus('done', 'ok');
-      return;
-    }
-
-    if (event.type === 'thinking') {
-      appendActivity('thinking', 'Thinking', event.text || 'denkt nach ...');
-      return;
-    }
-
-    if (event.type === 'command') {
-      appendActivity('command', 'Command', event.text || 'command');
-      return;
-    }
-
-    if (event.type === 'tool') {
-      appendActivity('tool', 'Tool', event.text || 'tool');
-      return;
-    }
-
-    if (event.type === 'output') {
-      appendActivity('output', 'Output', event.text || '');
-      return;
-    }
-
-    if (event.type === 'error') {
-      appendActivity('error', 'Error', event.text || 'Unknown error');
-      return;
-    }
-
-    appendActivity('event', 'Event', event.text || '');
-    return;
-  }
-
   if (payload.type === 'final') {
     state.sessionId = payload.sessionId || state.sessionId;
     setStatusPill(connectionStatus, state.sessionId ? 'connected' : 'ready', state.sessionId ? 'connected' : 'idle');
@@ -306,41 +232,26 @@ async function sendMessage(message) {
   resetRunUi();
   setBusy(true);
   renderUserMessage(message);
-  ensureAssistantMessage();
 
   try {
-    const response = await fetch('/api/chat/stream', {
+    const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
 
-    if (!response.ok || !response.body) {
-      const data = await response.json().catch(() => ({}));
-      throw new Error(data.error || 'Stream fehlgeschlagen');
-    }
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'Request failed');
 
-    await readNdjson(response, handleStreamPayload);
+    state.sessionId = data.sessionId || state.sessionId;
+    setStatusPill(connectionStatus, state.sessionId ? 'connected' : 'ready', state.sessionId ? 'connected' : 'idle');
+    finishAssistantText(data.text || (data.visualization ? 'Visualization generated.' : 'Response received.'));
+    renderVisualization(data);
   } catch (error) {
-    try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Unknown error');
-
-      state.sessionId = data.sessionId || state.sessionId;
-      setStatusPill(connectionStatus, state.sessionId ? 'connected' : 'ready', state.sessionId ? 'connected' : 'idle');
-      finishAssistantText(data.text || (data.visualization ? 'Visualization generated.' : 'Response received.'));
-      renderVisualization(data);
-    } catch (fallbackError) {
-      finishAssistantText(`Error: ${fallbackError.message || error.message}`);
-      vizRoot.innerHTML = '<div class="muted">No visualization available.</div>';
-      setMeta('Error while running the prompt.');
-      setVizStatus('fehler', 'error');
-    }
+    finishAssistantText(`Error: ${error.message || 'Unknown error'}`);
+    vizRoot.innerHTML = '<div class="muted">No visualization available.</div>';
+    setMeta('Error while running the prompt.');
+    setVizStatus('error', 'error');
   } finally {
     setBusy(false);
     chatInput.focus();
