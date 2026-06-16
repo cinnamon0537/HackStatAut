@@ -7,43 +7,73 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <main class="shell">
-      <section class="panel chat-panel">
-        <div class="panel-header">
-          <div>
-            <div class="eyebrow">ChatWithYourData</div>
-            <h1>Chat</h1>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <div class="eyebrow">ChatWithYourData</div>
+          <div class="brand-row">
+            <h1>OpenCode Workspace</h1>
+            <div class="status-pill" id="opencode-status">startet ...</div>
           </div>
-          <div class="status-pill" id="opencode-status">startet ...</div>
         </div>
-        <div id="chat-log" class="chat-log" aria-live="polite"></div>
-
-        <form id="chat-form" class="composer" autocomplete="off">
-          <textarea
-            id="chat-input"
-            class="chat-input"
-            rows="1"
-            placeholder="Schreib eine Frage oder fordere eine Visualisierung an..."
-          ></textarea>
-          <button class="send-button" type="submit">Senden</button>
-        </form>
-      </section>
-
-      <section class="panel viz-panel">
-        <div class="panel-header">
-          <div>
-            <div class="eyebrow">Ausgabe</div>
-            <h1>Visualisierung</h1>
-          </div>
+        <div class="topbar-pills">
+          <div class="status-pill subtle" id="stream-status">bereit</div>
           <div class="status-pill subtle" id="viz-status">wartet</div>
         </div>
+      </header>
 
-        <div class="viz-shell">
-          <div id="viz-meta" class="viz-meta">Bereit für den nächsten Prompt.</div>
-          <div id="viz-root" class="viz-root">
-            <div class="muted">Hier erscheinen Visualisierungen von OpenCode.</div>
+      <section class="workspace">
+        <section class="panel transcript-panel">
+          <div class="panel-header">
+            <div>
+              <div class="eyebrow">Conversation</div>
+              <h2>Stream</h2>
+            </div>
+            <div class="header-note">Live wie OpenCode</div>
           </div>
-        </div>
+
+          <div id="chat-log" class="chat-log transcript-log" aria-live="polite"></div>
+
+          <form id="chat-form" class="composer" autocomplete="off">
+            <textarea
+              id="chat-input"
+              class="chat-input"
+              rows="1"
+              placeholder="Frag, lass eine Visualisierung erzeugen oder gib einen Befehl vor..."
+            ></textarea>
+            <button class="send-button" type="submit">Senden</button>
+          </form>
+        </section>
+
+        <aside class="side-column">
+          <section class="panel activity-panel">
+            <div class="panel-header">
+              <div>
+                <div class="eyebrow">Thinking / Commands</div>
+                <h2>Activity</h2>
+              </div>
+              <div class="header-note">Was gerade passiert</div>
+            </div>
+            <div id="activity-log" class="activity-log"></div>
+          </section>
+
+          <section class="panel viz-panel">
+            <div class="panel-header">
+              <div>
+                <div class="eyebrow">Ausgabe</div>
+                <h2>Visualisierung</h2>
+              </div>
+              <div class="header-note">Charts / Python / Tabellen</div>
+            </div>
+
+            <div class="viz-shell">
+              <div id="viz-meta" class="viz-meta">Bereit für den nächsten Prompt.</div>
+              <div id="viz-root" class="viz-root">
+                <div class="muted">Hier erscheinen Visualisierungen von OpenCode.</div>
+              </div>
+            </div>
+          </section>
+        </aside>
       </section>
     </main>
 

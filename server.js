@@ -137,8 +137,66 @@ function readMessageText(messageDetail) {
     .trim();
 }
 
-async function waitForAssistantResponse(eventResponse, sessionId, userMessageId, timeoutMs = 120000) {
-  const response = eventResponse || await fetch(`${OPENCODE_WEB_URL}/api/event`);
+function normalizeOpenCodeEvent(event) {
+  const info = event?.data?.info || event?.info || {};
+  const part = event?.part || event?.data?.part || {};
+  const text = typeof part.text === 'string'
+    ? part.text
+    : typeof part.message === 'string'
+      ? part.message
+      : typeof event?.text === 'string'
+        ? event.text
+        : typeof event?.message === 'string'
+          ? event.message
+          : '';
+  const rawType = String(event?.type || '').toLowerCase();
+  const source = `${rawType} ${JSON.stringify(info)} ${JSON.stringify(part)}`.toLowerCase();
+  let kind = 'event';
+
+  if (rawType === 'text') kind = 'text';
+  else if (rawType === 'error') kind = 'error';
+  else if (rawType.includes('message.updated') && info.role === 'assistant') kind = info.finish === 'stop' ? 'assistant-final' : 'assistant';
+  else if (source.includes('command') || source.includes('shell') || source.includes('exec')) kind = 'command';
+  else if (source.includes('think') || source.includes('reason')) kind = 'thinking';
+  else if (source.includes('tool')) kind = 'tool';
+  else if (source.includes('output') || source.includes('stdout') || source.includes('stderr')) kind = 'output';
+
+  return {
+    kind,
+    type: event?.type || '',
+    sessionId: event?.data?.sessionID || event?.sessionID || '',
+    id: info.id || event?.id || '',
+    parentId: info.parentID || event?.parentID || '',
+    role: info.role || event?.role || '',
+    finish: info.finish || event?.finish || '',
+    text,
+    message: text,
+    raw: event,
+  };
+}
+
+async function consumeOpenCodePrompt(sessionId, message, { visualize = false, timeoutMs = 120000, onEvent } = {}) {
+  const userMessageId = makeMessageId();
+  const eventStreamPromise = fetch(`${OPENCODE_WEB_URL}/api/event`);
+  const body = {
+    messageID: userMessageId,
+    agent: OPENCODE_AGENT,
+    model: OPENCODE_MODEL,
+    noReply: true,
+    parts: [{ type: 'text', text: message }],
+  };
+
+  if (visualize) {
+    body.system = VIZ_PROMPT;
+  }
+
+  void opencodeRequest(`/session/${sessionId}/prompt_async`, {
+    method: 'POST',
+    query: { directory: ROOT },
+    body,
+  }).catch(() => {});
+
+  const response = await eventStreamPromise;
   if (!response.ok || !response.body) {
     throw new Error('OpenCode event stream unavailable');
   }
@@ -171,6 +229,9 @@ async function waitForAssistantResponse(eventResponse, sessionId, userMessageId,
         }
 
         if (event?.data?.sessionID !== sessionId) continue;
+        const normalized = normalizeOpenCodeEvent(event);
+        onEvent?.(normalized);
+
         if (event.type === 'message.updated' && event.data?.info?.role === 'assistant' && event.data?.info?.parentID === userMessageId && event.data?.info?.finish === 'stop') {
           const assistantId = event.data.info.id;
           const detail = await opencodeRequest(`/session/${sessionId}/message/${assistantId}`, {
@@ -178,6 +239,7 @@ async function waitForAssistantResponse(eventResponse, sessionId, userMessageId,
           });
           return {
             assistantId,
+            userMessageId,
             text: readMessageText(detail),
             detail,
           };
@@ -192,27 +254,7 @@ async function waitForAssistantResponse(eventResponse, sessionId, userMessageId,
 }
 
 async function submitOpenCodePrompt(sessionId, message, { visualize = false } = {}) {
-  const userMessageId = makeMessageId();
-  const eventStreamPromise = fetch(`${OPENCODE_WEB_URL}/api/event`);
-  const body = {
-    messageID: userMessageId,
-    agent: OPENCODE_AGENT,
-    model: OPENCODE_MODEL,
-    noReply: true,
-    parts: [{ type: 'text', text: message }],
-  };
-
-  if (visualize) {
-    body.system = VIZ_PROMPT;
-  }
-
-  void opencodeRequest(`/session/${sessionId}/prompt_async`, {
-    method: 'POST',
-    query: { directory: ROOT },
-    body,
-  }).catch(() => {});
-
-  return waitForAssistantResponse(await eventStreamPromise, sessionId, userMessageId);
+  return consumeOpenCodePrompt(sessionId, message, { visualize });
 }
 
 function safeResolve(requestPath = '') {
@@ -587,6 +629,57 @@ app.post('/api/exec', async (req, res) => {
     });
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+app.post('/api/chat/stream', async (req, res) => {
+  let finished = false;
+  const send = (payload) => {
+    if (finished || res.writableEnded) return;
+    res.write(`${JSON.stringify(payload)}\n`);
+  };
+
+  try {
+    const message = String(req.body?.message || '').trim();
+    const sessionId = String(req.body?.sessionId || '').trim();
+    if (!message) return res.status(400).json({ error: 'Message missing' });
+
+    const activeSessionId = sessionId || await ensureOpenCodeSession();
+    res.status(200);
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+
+    send({ type: 'session', sessionId: activeSessionId });
+
+    const result = await consumeOpenCodePrompt(activeSessionId, message, {
+      visualize: isVizRequest(message),
+      onEvent: (event) => send({ type: 'event', event }),
+    });
+
+    const vizSpec = extractVizSpec(result.text);
+    const assistantText = stripVizSpec(result.text);
+    const visualization = vizSpec ? await renderVisualizationSpec(vizSpec, undefined) : null;
+
+    send({
+      type: 'final',
+      ...result,
+      text: assistantText,
+      vizSpec,
+      visualization,
+      sessionId: activeSessionId,
+    });
+    finished = true;
+    res.end();
+  } catch (error) {
+    if (!res.headersSent) {
+      res.status(error.statusCode || 500).json({ error: error.message });
+      return;
+    }
+    send({ type: 'error', error: error.message });
+    finished = true;
+    res.end();
   }
 });
 
