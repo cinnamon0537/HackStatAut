@@ -7,6 +7,7 @@ const streamStatus = document.getElementById('stream-status');
 const vizStatus = document.getElementById('viz-status');
 const vizRoot = document.getElementById('viz-root');
 const vizMeta = document.getElementById('viz-meta');
+const chatIntro = document.getElementById('chat-intro');
 
 const state = {
   sessionId: '',
@@ -25,6 +26,10 @@ function escapeHtml(value) {
 
 function scrollBottom(node) {
   node.scrollTop = node.scrollHeight;
+}
+
+function hideChatIntro() {
+  if (chatIntro) chatIntro.hidden = true;
 }
 
 function setStatusPill(node, text, tone = '') {
@@ -114,6 +119,7 @@ function createCard(kind, title, text = '') {
 }
 
 function renderUserMessage(text) {
+  hideChatIntro();
   const { card, body } = createCard('user', 'Du');
   body.innerHTML = escapeHtml(text).replaceAll('\n', '<br>');
   chatLog.append(card);
@@ -121,6 +127,7 @@ function renderUserMessage(text) {
 }
 
 function ensureAssistantMessage() {
+  hideChatIntro();
   if (state.activeAssistant) return state.activeAssistant;
 
   const { card, body } = createCard('assistant', 'OpenCode');

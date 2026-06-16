@@ -13,6 +13,9 @@
   --warn: #c6a15a;
   --bad: #c66a6a;
   --shadow: none;
+  --icon-weak-base: #111111;
+  --icon-strong-base: #e8e8e8;
+  --icon-shadow-base: #5f6674;
 }
 
 * { box-sizing: border-box; }
@@ -34,10 +37,10 @@ button, select, input, textarea {
 
 .app-shell {
   min-height: 100vh;
-  padding: 8px;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
 }
 
 .topbar {
@@ -45,7 +48,8 @@ button, select, input, textarea {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 2px 2px 0;
+  padding: 8px 12px 6px;
+  border-bottom: 1px solid var(--line);
 }
 
 .brand-block {
@@ -80,8 +84,8 @@ h1, h2 {
   letter-spacing: -0.02em;
 }
 
-h1 { font-size: 22px; }
-h2 { font-size: 15px; }
+h1 { font-size: 16px; }
+h2 { font-size: 14px; }
 
 .status-pill {
   padding: 5px 8px;
@@ -117,21 +121,25 @@ h2 { font-size: 15px; }
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1.28fr) minmax(340px, 0.92fr);
-  gap: 8px;
+  grid-template-columns: minmax(0, 0.8fr) minmax(380px, 1fr);
+  gap: 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 0 12px 12px;
 }
 
 .side-column {
   min-height: 0;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) minmax(320px, 0.9fr);
-  gap: 8px;
+  grid-template-rows: minmax(0, 1fr) minmax(320px, 0.95fr);
+  gap: 0;
 }
 
 .panel {
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: 0;
   box-shadow: var(--shadow);
   overflow: hidden;
   display: flex;
@@ -139,12 +147,28 @@ h2 { font-size: 15px; }
   min-height: 0;
 }
 
+.transcript-panel {
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
+  margin: 0;
+}
+
+.activity-panel {
+  border: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.viz-panel {
+  border: 0;
+}
+
 .panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 10px 12px 8px;
+  padding: 8px 12px 7px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -163,26 +187,43 @@ h2 { font-size: 15px; }
 .activity-log {
   min-height: 0;
   overflow: auto;
-  padding: 10px;
+  padding: 14px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .chat-log {
   flex: 1;
+  background: #1a1a1a;
 }
 
 .activity-log {
   flex: 1;
-  background: #141414;
+  background: #1a1a1a;
+}
+
+.activity-log:empty::before {
+  content: "No changes";
+  color: var(--muted);
+  font-size: 13px;
+  margin: auto;
+}
+
+.viz-root:empty::before {
+  content: "No changes";
+  color: var(--muted);
+  font-size: 13px;
+  display: grid;
+  place-items: center;
+  min-height: 100%;
 }
 
 .event-card {
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: 2px;
   background: #121212;
-  padding: 8px 8px 6px;
+  padding: 10px 10px 8px;
 }
 
 .event-card.user {
@@ -246,6 +287,47 @@ h2 { font-size: 15px; }
   min-height: 40px;
 }
 
+.chat-intro {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  text-align: center;
+  color: var(--text);
+  max-width: 100%;
+  margin: auto;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+
+.logo-mark {
+  width: 220px;
+  height: auto;
+  display: block;
+  image-rendering: pixelated;
+}
+
+.logo-mark rect {
+  shape-rendering: crispEdges;
+}
+
+.chat-intro-title {
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.chat-intro-path {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.chat-intro-meta {
+  font-size: 13px;
+  color: var(--muted);
+}
+
 .assistant-cursor {
   color: var(--accent);
   animation: blink 1s steps(1, end) infinite;
@@ -255,14 +337,14 @@ h2 { font-size: 15px; }
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 8px;
-  padding: 10px;
+  padding: 10px 12px 12px;
   border-top: 1px solid var(--line);
   background: var(--panel-2);
 }
 
 .chat-input,
 .send-button {
-  border-radius: 3px;
+  border-radius: 6px;
   border: 1px solid var(--line);
   background: #111111;
   color: var(--text);
@@ -270,7 +352,7 @@ h2 { font-size: 15px; }
 
 .chat-input {
   resize: none;
-  min-height: 40px;
+  min-height: 58px;
   max-height: 180px;
   padding: 9px 10px;
   outline: none;
@@ -313,9 +395,9 @@ h2 { font-size: 15px; }
 }
 
 .viz-root {
-  margin: 10px 10px 10px;
-  padding: 10px;
-  border-radius: 3px;
+  margin: 10px 12px 12px;
+  padding: 12px;
+  border-radius: 2px;
   border: 1px solid var(--line);
   background: #101010;
   overflow: auto;
@@ -447,10 +529,13 @@ h2 { font-size: 15px; }
 @media (max-width: 1100px) {
   .workspace { grid-template-columns: 1fr; }
   .side-column { grid-template-rows: auto auto; }
+  .workspace { margin: 0 12px 12px; }
+  .transcript-panel { border-right: 0; }
+  .activity-panel { border-bottom: 1px solid var(--line); }
 }
 
 @media (max-width: 720px) {
-  .app-shell { padding: 8px; }
+  .app-shell { padding: 0; }
   .topbar { align-items: flex-start; flex-direction: column; }
   .composer { grid-template-columns: 1fr; }
   .send-button { min-height: 40px; }
@@ -474,4 +559,66 @@ h2 { font-size: 15px; }
 
 .activity-panel .event-card {
   background: #101010;
+}
+
+.transcript-panel .chat-log {
+  background: #111111;
+}
+
+.transcript-panel .event-card {
+  border-radius: 3px;
+}
+
+.transcript-panel .event-card.user {
+  background: #151515;
+}
+
+.transcript-panel .event-card.assistant {
+  background: #121212;
+}
+
+.activity-panel .event-card,
+.viz-panel .viz-root,
+.viz-panel .panel-header,
+.activity-panel .panel-header,
+.transcript-panel .panel-header {
+  background: #151515;
+}
+
+.transcript-panel .panel-header,
+.activity-panel .panel-header,
+.viz-panel .panel-header {
+  border-bottom-color: #2b2b2b;
+}
+
+.transcript-panel .chat-log,
+.activity-panel .activity-log,
+.viz-panel .viz-root {
+  scrollbar-color: #444 #121212;
+}
+
+.transcript-panel .chat-log::-webkit-scrollbar,
+.activity-panel .activity-log::-webkit-scrollbar,
+.viz-panel .viz-root::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.transcript-panel .chat-log::-webkit-scrollbar-thumb,
+.activity-panel .activity-log::-webkit-scrollbar-thumb,
+.viz-panel .viz-root::-webkit-scrollbar-thumb {
+  background: #3a3a3a;
+  border: 2px solid #121212;
+  border-radius: 999px;
+}
+
+.transcript-panel .chat-log::-webkit-scrollbar-track,
+.activity-panel .activity-log::-webkit-scrollbar-track,
+.viz-panel .viz-root::-webkit-scrollbar-track {
+  background: #121212;
+}
+
+.topbar .brand-row,
+.topbar .topbar-pills {
+  align-items: center;
 }
