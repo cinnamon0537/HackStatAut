@@ -7,7 +7,6 @@ const vizStatus = document.getElementById('viz-status');
 const vizRoot = document.getElementById('viz-root');
 const vizMeta = document.getElementById('viz-meta');
 const chatIntro = document.getElementById('chat-intro');
-
 const state = {
   sessionId: '',
   busy: false,
@@ -55,6 +54,84 @@ function setVizStatus(text, tone = 'idle') {
 
 function setStreamStatus(text, tone = 'idle') {
   setStatusPill(streamStatus, text, tone);
+}
+
+function isDemoVisualizationRequest(message) {
+  return /\bdemo\s+(grafik|chart|visualisierung|visualization)\b/i.test(message)
+    || /\bdemo\s+chart\b/i.test(message);
+}
+
+function renderDemoVisualization() {
+  const barData = [
+    { label: 'A', value: 32 },
+    { label: 'B', value: 24 },
+    { label: 'C', value: 18 },
+  ];
+  const pieData = [
+    { label: 'North', value: 40 },
+    { label: 'East', value: 25 },
+    { label: 'South', value: 20 },
+    { label: 'West', value: 15 },
+  ];
+  const barMax = Math.max(...barData.map((item) => item.value), 1);
+  const pieTotal = pieData.reduce((sum, item) => sum + item.value, 0);
+  const colors = ['#ffbf4d', '#ff9d00', '#f472b6', '#84ccff'];
+
+  const pieSlices = [];
+  let currentAngle = 0;
+  const polarToCartesian = (cx, cy, radius, angleDeg) => {
+    const angleRad = (angleDeg - 90) * (Math.PI / 180);
+    return {
+      x: cx + radius * Math.cos(angleRad),
+      y: cy + radius * Math.sin(angleRad),
+    };
+  };
+
+  for (const [index, item] of pieData.entries()) {
+    const sliceAngle = (item.value / pieTotal) * 360;
+    const startAngle = currentAngle;
+    const endAngle = currentAngle + sliceAngle;
+    currentAngle = endAngle;
+    const start = polarToCartesian(140, 140, 104, endAngle);
+    const end = polarToCartesian(140, 140, 104, startAngle);
+    const largeArc = endAngle - startAngle <= 180 ? '0' : '1';
+    pieSlices.push(`<path d="M 140 140 L ${start.x} ${start.y} A 104 104 0 ${largeArc} 0 ${end.x} ${end.y} Z" fill="${colors[index % colors.length]}"></path>`);
+  }
+
+  vizRoot.innerHTML = `
+    <article class="artifact-card demo-card">
+      <div class="artifact-title">Demo Bar Chart</div>
+      <div class="chart">
+        ${barData.map((item) => `
+          <div class="bar">
+            <div>${escapeHtml(item.label)}</div>
+            <div class="bar-track"><div class="bar-fill" style="width:${(item.value / barMax) * 100}%"></div></div>
+            <div class="muted">${item.value}</div>
+          </div>
+        `).join('')}
+      </div>
+    </article>
+    <article class="artifact-card demo-card">
+      <div class="artifact-title">Demo Pie Chart</div>
+      <div class="pie-wrap">
+        <svg viewBox="0 0 280 280" class="pie-chart" role="img" aria-label="Demo pie chart">
+          <rect x="0" y="0" width="280" height="280" rx="16" fill="#0f0f0f" stroke="#262626"></rect>
+          ${pieSlices.join('')}
+        </svg>
+        <div class="pie-legend">
+          ${pieData.map((item, index) => `
+            <div class="pie-legend-row">
+              <span class="pie-dot" style="background:${colors[index % colors.length]}"></span>
+              <span class="pie-legend-label">${item.label}</span>
+              <span class="pie-legend-value">${Math.round((item.value / pieTotal) * 100)}%</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    </article>
+  `;
+  setMeta('Demo visualizations created.');
+  setVizStatus('demo', 'ok');
 }
 
 function shouldVisualize(message) {
@@ -232,6 +309,15 @@ async function sendMessage(message) {
   resetRunUi();
   setBusy(true);
   renderUserMessage(message);
+
+  if (isDemoVisualizationRequest(message)) {
+    finishAssistantText('Demo-Visualisierung erstellt.');
+    renderDemoVisualization();
+    setBusy(false);
+    chatInput.focus();
+    syncComposerHeight();
+    return;
+  }
 
   try {
     const response = await fetch('/api/chat', {
