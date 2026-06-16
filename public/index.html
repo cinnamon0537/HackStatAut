@@ -22,40 +22,19 @@
       <section class="panel viz-panel">
         <div class="panel-header">
           <div>
-            <div class="eyebrow">Daten</div>
-            <h1>Dateien & Visualisierung</h1>
-          </div>
-          <div class="mode-row">
-            <select id="mode-select">
-              <option value="auto">Auto</option>
-              <option value="text">Text</option>
-              <option value="json">JSON</option>
-              <option value="table">Tabelle</option>
-              <option value="chart">Balken</option>
-              <option value="pie">Pie</option>
-              <option value="image">Bild</option>
-            </select>
+            <div class="eyebrow">Ausgabe</div>
+            <h1>Visualisierung</h1>
           </div>
         </div>
 
-        <div class="viz-controls">
-          <div class="files">
-            <div class="subhead">Dateien</div>
-            <div id="file-tree" class="file-tree"></div>
+        <div class="viz-shell">
+          <div class="viz-actions">
+            <div class="status-pill" id="visualize-mode">normal</div>
+            <button id="visualize-next" class="ghost" type="button">Visualisieren</button>
           </div>
-
-          <div class="viz-work">
-            <label class="subhead" for="viz-prompt">Visualisierung</label>
-            <textarea id="viz-prompt" rows="3" placeholder="z.B. visualisier diese Datei als Tabelle, oder bau ein Piechart daraus"></textarea>
-            <div class="action-row">
-              <div id="selected-file" class="selected-file">Noch keine Datei gewählt</div>
-              <div class="button-row">
-                <button id="refresh-files" class="ghost" type="button">Neu laden</button>
-                <button id="visualize-file" type="button">Visualisieren</button>
-              </div>
-            </div>
-            <div id="viz-meta" class="viz-meta"></div>
-            <div id="viz-root" class="viz-root"></div>
+          <div id="viz-meta" class="viz-meta">Bereit für den nächsten Prompt.</div>
+          <div id="viz-root" class="viz-root">
+            <div class="muted">Hier erscheinen Visualisierungen von OpenCode.</div>
           </div>
         </div>
       </section>

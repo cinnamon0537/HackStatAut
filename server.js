@@ -482,9 +482,10 @@ app.post('/api/chat', async (req, res) => {
     const message = String(req.body?.message || '').trim();
     const sessionId = String(req.body?.sessionId || '').trim();
     const filePath = String(req.body?.filePath || '').trim();
+    const visualizeNext = req.body?.visualizeNext === true || req.body?.visualizeNext === 'true';
     if (!message) return res.status(400).json({ error: 'Message missing' });
 
-    const prompt = isVizRequest(message) ? `${message}\n\n${VIZ_PROMPT}` : message;
+    const prompt = visualizeNext || isVizRequest(message) ? `${message}\n\n${VIZ_PROMPT}` : message;
 
     const result = await runOpenCode({
       message: prompt,
