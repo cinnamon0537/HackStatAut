@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -8,20 +8,6 @@
   </head>
   <body>
     <main class="app-shell">
-      <header class="topbar">
-        <div class="brand-block">
-          <div class="eyebrow">ChatWithYourData</div>
-          <div class="brand-row">
-            <h1>OpenCode Workspace</h1>
-            <div class="status-pill" id="opencode-status">startet ...</div>
-          </div>
-        </div>
-        <div class="topbar-pills">
-          <div class="status-pill subtle" id="stream-status">bereit</div>
-          <div class="status-pill subtle" id="viz-status">wartet</div>
-        </div>
-      </header>
-
       <section class="workspace">
         <section class="panel transcript-panel">
           <div class="panel-header">
@@ -29,7 +15,7 @@
               <div class="eyebrow">Conversation</div>
               <h2>Stream</h2>
             </div>
-            <div class="header-note">Live wie OpenCode</div>
+            <div class="header-note">Live updates</div>
           </div>
 
           <div id="chat-log" class="chat-log transcript-log" aria-live="polite">
@@ -158,7 +144,7 @@
 <rect x="200" y="60" width="10" height="10" fill="#f2f2f2"/>
                 </g>
               </svg>
-              <div class="chat-intro-title">Build anything</div>
+              <div class="chat-intro-title">ChatWithYourData</div>
               <div class="chat-intro-path">/mnt/c/Users/benja/Desktop/HackStatAut</div>
               <div class="chat-intro-meta">Main branch (main)</div>
               <div class="chat-intro-meta">Last modified 3 minutes ago</div>
@@ -166,13 +152,13 @@
           </div>
 
           <form id="chat-form" class="composer" autocomplete="off">
-            <textarea
+              <textarea
               id="chat-input"
               class="chat-input"
               rows="1"
-              placeholder="Frag, lass eine Visualisierung erzeugen oder gib einen Befehl vor..."
+              placeholder="Ask a question, request a visualization, or run a command..."
             ></textarea>
-            <button class="send-button" type="submit">Senden</button>
+            <button class="send-button" type="submit">Send</button>
           </form>
         </section>
 
@@ -183,7 +169,7 @@
                 <div class="eyebrow">Thinking / Commands</div>
                 <h2>Activity</h2>
               </div>
-              <div class="header-note">Was gerade passiert</div>
+              <div class="header-note">What's going on</div>
             </div>
             <div id="activity-log" class="activity-log"></div>
           </section>
@@ -191,16 +177,16 @@
           <section class="panel viz-panel">
             <div class="panel-header">
               <div>
-                <div class="eyebrow">Ausgabe</div>
-                <h2>Visualisierung</h2>
+                <div class="eyebrow">Output</div>
+                <h2>Visualization</h2>
               </div>
               <div class="header-note">Charts / Python / Tabellen</div>
             </div>
 
             <div class="viz-shell">
-              <div id="viz-meta" class="viz-meta">Bereit für den nächsten Prompt.</div>
+              <div id="viz-meta" class="viz-meta">Ready for the next prompt.</div>
               <div id="viz-root" class="viz-root">
-                <div class="muted">Hier erscheinen Visualisierungen von OpenCode.</div>
+                <div class="muted">Visualizations appear here.</div>
               </div>
             </div>
           </section>

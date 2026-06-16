@@ -2,7 +2,7 @@ const chatForm = document.getElementById('chat-form');
 const chatInput = document.getElementById('chat-input');
 const chatLog = document.getElementById('chat-log');
 const activityLog = document.getElementById('activity-log');
-const opencodeStatus = document.getElementById('opencode-status');
+const connectionStatus = document.getElementById('connection-status');
 const streamStatus = document.getElementById('stream-status');
 const vizStatus = document.getElementById('viz-status');
 const vizRoot = document.getElementById('viz-root');
@@ -33,13 +33,14 @@ function hideChatIntro() {
 }
 
 function setStatusPill(node, text, tone = '') {
+  if (!node) return;
   node.textContent = text;
   node.dataset.tone = tone;
 }
 
 function setBusy(isBusy) {
   state.busy = isBusy;
-  setStatusPill(opencodeStatus, isBusy ? 'arbeitet ...' : state.sessionId ? 'verbunden' : 'bereit', isBusy ? 'busy' : state.sessionId ? 'connected' : 'idle');
+  setStatusPill(connectionStatus, isBusy ? 'working ...' : state.sessionId ? 'connected' : 'ready', isBusy ? 'busy' : state.sessionId ? 'connected' : 'idle');
   setStatusPill(streamStatus, isBusy ? 'streaming' : 'idle', isBusy ? 'busy' : 'idle');
   chatInput.disabled = isBusy;
   chatForm.querySelector('button[type="submit"]').disabled = isBusy;
@@ -65,7 +66,7 @@ function renderVisualization(result) {
   if (result.visualization) {
     if (result.visualization.html) {
       vizRoot.innerHTML = result.visualization.html;
-      setMeta(`${result.visualization.kind || 'visual'} · ${result.visualization.title || 'OpenCode'}`);
+      setMeta(`${result.visualization.kind || 'visual'} · ${result.visualization.title || 'ChatWithYourData'}`);
       setVizStatus('aktualisiert', 'ok');
       return;
     }
@@ -79,22 +80,22 @@ function renderVisualization(result) {
       } else {
         vizRoot.innerHTML = `<pre>${escapeHtml(artifact.content || result.visualization.stdout || result.visualization.stderr || '')}</pre>`;
       }
-      setMeta(`${result.visualization.kind || 'python'} · ${result.visualization.title || 'OpenCode'}`);
+      setMeta(`${result.visualization.kind || 'python'} · ${result.visualization.title || 'ChatWithYourData'}`);
       setVizStatus('aktualisiert', 'ok');
       return;
     }
   }
 
   if (result.text) {
-    vizRoot.innerHTML = '<div class="muted">Keine Visualisierung erzeugt.</div>';
-    setMeta('OpenCode hat eine Textantwort geliefert.');
-    setVizStatus('leer', 'idle');
+    vizRoot.innerHTML = '<div class="muted">No visualization generated.</div>';
+    setMeta('The assistant returned text only.');
+    setVizStatus('empty', 'idle');
     return;
   }
 
-  vizRoot.innerHTML = '<div class="muted">Keine Ausgabe erhalten.</div>';
-  setMeta('Keine Visualisierung erzeugt.');
-  setVizStatus('leer', 'idle');
+  vizRoot.innerHTML = '<div class="muted">No output received.</div>';
+  setMeta('No visualization generated.');
+  setVizStatus('empty', 'idle');
 }
 
 function createCard(kind, title, text = '') {
@@ -130,7 +131,7 @@ function ensureAssistantMessage() {
   hideChatIntro();
   if (state.activeAssistant) return state.activeAssistant;
 
-  const { card, body } = createCard('assistant', 'OpenCode');
+  const { card, body } = createCard('assistant', 'ChatWithYourData');
   card.classList.add('assistant-stream');
   body.className = 'event-body assistant-live';
   body.innerHTML = '<span class="assistant-cursor">▍</span>';
@@ -183,16 +184,16 @@ function classifyEvent(event) {
   if (kind === 'command' || rawType.includes('command') || rawType.includes('shell') || rawType.includes('exec')) return { type: 'command', text: text || rawType };
   if (kind === 'tool' || rawType.includes('tool')) return { type: 'tool', text: text || rawType };
   if (kind === 'output' || rawType.includes('stdout') || rawType.includes('stderr') || rawType.includes('output')) return { type: 'output', text };
-  if (kind === 'error' || rawType === 'error') return { type: 'error', text: text || 'Fehler' };
+  if (kind === 'error' || rawType === 'error') return { type: 'error', text: text || 'Error' };
   return { type: 'event', text: text || JSON.stringify(event.raw || event, null, 2) };
 }
 
 function resetRunUi() {
   activityLog.innerHTML = '';
   state.activeAssistant = null;
-  vizRoot.innerHTML = '<div class="muted">Warte auf Ausgabe ...</div>';
-  setMeta('OpenCode verarbeitet den Prompt.');
-  setVizStatus('läuft', 'busy');
+  vizRoot.innerHTML = '<div class="muted">Waiting for output ...</div>';
+  setMeta('ChatWithYourData is processing the prompt.');
+  setVizStatus('running', 'busy');
 }
 
 async function readNdjson(response, onLine) {
@@ -242,8 +243,8 @@ function handleStreamPayload(payload) {
     }
 
     if (event.type === 'assistant-final') {
-      finishAssistantText(state.activeAssistant?.text || event.text || 'Antwort erhalten.');
-      setStreamStatus('fertig', 'ok');
+      finishAssistantText(state.activeAssistant?.text || event.text || 'Response received.');
+      setStreamStatus('done', 'ok');
       return;
     }
 
@@ -268,7 +269,7 @@ function handleStreamPayload(payload) {
     }
 
     if (event.type === 'error') {
-      appendActivity('error', 'Error', event.text || 'Unbekannter Fehler');
+      appendActivity('error', 'Error', event.text || 'Unknown error');
       return;
     }
 
@@ -278,8 +279,8 @@ function handleStreamPayload(payload) {
 
   if (payload.type === 'final') {
     state.sessionId = payload.sessionId || state.sessionId;
-    opencodeStatus.textContent = state.sessionId ? 'verbunden' : 'bereit';
-    const assistantText = payload.text || (payload.visualization ? 'Visualisierung erzeugt.' : 'Antwort erhalten.');
+    setStatusPill(connectionStatus, state.sessionId ? 'connected' : 'ready', state.sessionId ? 'connected' : 'idle');
+    const assistantText = payload.text || (payload.visualization ? 'Visualization generated.' : 'Response received.');
     finishAssistantText(assistantText);
     renderVisualization(payload);
     setBusy(false);
@@ -287,7 +288,7 @@ function handleStreamPayload(payload) {
   }
 
   if (payload.type === 'error') {
-    appendActivity('error', 'Error', payload.error || 'Unbekannter Fehler');
+    appendActivity('error', 'Error', payload.error || 'Unknown error');
     setBusy(false);
   }
 }
@@ -299,7 +300,7 @@ async function sendMessage(message) {
   };
 
   if (shouldVisualize(message)) {
-    setVizStatus('erkennt visuell', 'busy');
+    setVizStatus('visualizing', 'busy');
   }
 
   resetRunUi();
@@ -328,16 +329,16 @@ async function sendMessage(message) {
         body: JSON.stringify(body),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Unbekannter Fehler');
+      if (!response.ok) throw new Error(data.error || 'Unknown error');
 
       state.sessionId = data.sessionId || state.sessionId;
-      opencodeStatus.textContent = state.sessionId ? 'verbunden' : 'bereit';
-      finishAssistantText(data.text || (data.visualization ? 'Visualisierung erzeugt.' : 'Antwort erhalten.'));
+      setStatusPill(connectionStatus, state.sessionId ? 'connected' : 'ready', state.sessionId ? 'connected' : 'idle');
+      finishAssistantText(data.text || (data.visualization ? 'Visualization generated.' : 'Response received.'));
       renderVisualization(data);
     } catch (fallbackError) {
-      finishAssistantText(`Fehler: ${fallbackError.message || error.message}`);
-      vizRoot.innerHTML = '<div class="muted">Keine Visualisierung verfügbar.</div>';
-      setMeta('Fehler beim Ausführen des OpenCode-Prompts.');
+      finishAssistantText(`Error: ${fallbackError.message || error.message}`);
+      vizRoot.innerHTML = '<div class="muted">No visualization available.</div>';
+      setMeta('Error while running the prompt.');
       setVizStatus('fehler', 'error');
     }
   } finally {
@@ -370,6 +371,6 @@ chatInput.addEventListener('keydown', (event) => {
 });
 
 setBusy(false);
-setVizStatus('wartet', 'idle');
-setMeta('Bereit für eine Visualisierung oder eine normale Antwort.');
+setVizStatus('waiting', 'idle');
+setMeta('Ready for a visualization or a normal response.');
 syncComposerHeight();
