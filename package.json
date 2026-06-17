@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "node server.js",
     "start": "node server.js",
-    "show": "node scripts/show.mjs"
+    "show": "node scripts/show.mjs",
+    "test": "node --test"
   },
   "dependencies": {
     "express": "^4.21.2",

@@ -1,14 +1,16 @@
 import express from 'express';
 import { spawn } from 'node:child_process';
-import { promises as fs } from 'node:fs';
+import { promises as fs, realpathSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import readline from 'node:readline';
 import { randomUUID } from 'node:crypto';
+import { extractVisualizationSpecs, stripFencedVizSpecs } from './lib/vizjson.js';
 
 const app = express();
 const ROOT = process.cwd();
 const DATA_ROOT = path.resolve(process.env.HACKSTAT_DATA_ROOT || path.join(ROOT, 'database'));
+const DATA_ROOT_REAL = realpathSync(DATA_ROOT);
 const PORT = Number(process.env.PORT || 3000);
 const OPENCODE_WEB_PORT = Number(process.env.OPENCODE_WEB_PORT || 4096);
 const OPENCODE_WEB_URL = `http://127.0.0.1:${OPENCODE_WEB_PORT}`;
@@ -55,10 +57,24 @@ const VIZ_PROMPT = [
   'Wenn keine Visualisierung nötig ist, antworte normal ohne vizjson-Block.',
 ].join(' ');
 
+const MASTER_SYSTEM_PROMPT = [
+  'Du bist ChatWithYourData, ein Assistent für STATcube-Metadaten und -Abfragen.',
+  'Arbeite nur mit der lokalen database-Basis und den übergebenen Abfragekontexten.',
+  'Wenn der Nutzer eine Visualisierung, Tabelle oder Struktur will, darfst du genau einen ```vizjson```-Block liefern.',
+  'Der vizjson-Block muss valide sein und kann table, tree, bar, pie oder python verwenden.',
+  'Antworte knapp, faktisch und ohne unnötige Meta-Kommentare.',
+  'Zeige keine internen Gedankengänge, Zwischenschritte oder Begründungsketten.',
+].join(' ');
+
 const OPENCODE_AGENT = 'build';
 const OPENCODE_MODEL = { providerID: 'opencode', modelID: 'north-mini-code-free' };
 let openCodeSessionId = '';
 let openCodeSessionInit = null;
+let latestOpenCodeSessionId = '';
+let vizStateVersion = 0;
+let vizStateItems = [];
+const processedAssistantMessages = new Set();
+let lastBridgeLogSignature = '';
 
 function makeMessageId() {
   return `msg_${randomUUID().replaceAll('-', '')}`;
@@ -73,6 +89,25 @@ function buildQuery(params = {}) {
   return search.toString();
 }
 
+function encodeOpenCodeProjectPath(directory) {
+  return Buffer.from(directory, 'utf8').toString('base64').replace(/=+$/u, '');
+}
+
+function buildOpenCodeSessionUrl(sessionId) {
+  return `${OPENCODE_WEB_URL}/${encodeOpenCodeProjectPath(DATA_ROOT_REAL)}/session/${sessionId}`;
+}
+
+function logCanonicalBridgeState(canonicalSessionId, iframeUrl, polledSessionId) {
+  const signature = `${canonicalSessionId}|${iframeUrl}|${polledSessionId}`;
+  if (!canonicalSessionId || signature === lastBridgeLogSignature) return;
+  lastBridgeLogSignature = signature;
+  console.log(`canonicalSessionId=${canonicalSessionId}`);
+  console.log(`iframeUrl=${iframeUrl}`);
+  console.log(`polledSessionId=${polledSessionId}`);
+}
+
+void startOpenCodeVizBridge();
+
 function isDemoVisualizationRequest(message) {
   return /\bdemo\s+(grafik|visualisierung|visualization|chart)\b/i.test(String(message || ''))
     || /\bdemo\s+chart\b/i.test(String(message || ''));
@@ -84,7 +119,7 @@ async function buildDemoVisualizationResult(message, sessionId = '') {
   const vizSpecs = [];
 
   for (const item of demo.results || []) {
-    const specs = extractVizSpecs(item.text);
+    const specs = extractVisualizationSpecs(item.text);
     for (const spec of specs) {
       const visualization = await renderVisualizationSpec(spec, undefined);
       if (!visualization) continue;
@@ -173,6 +208,7 @@ async function ensureOpenCodeSession() {
     });
     openCodeSessionId = created?.data?.id || created?.id || '';
     if (!openCodeSessionId) throw new Error('OpenCode session could not be created');
+    latestOpenCodeSessionId = openCodeSessionId;
 
     await opencodeRequest(`/session/${openCodeSessionId}/init`, {
       method: 'POST',
@@ -180,11 +216,15 @@ async function ensureOpenCodeSession() {
       body: { providerID: OPENCODE_MODEL.providerID, modelID: OPENCODE_MODEL.modelID, messageID: makeMessageId() },
     });
 
+    logCanonicalBridgeState(openCodeSessionId, buildOpenCodeSessionUrl(openCodeSessionId), openCodeSessionId);
+
     return openCodeSessionId;
   })();
 
   try {
-    return await openCodeSessionInit;
+    const sessionId = await openCodeSessionInit;
+    latestOpenCodeSessionId = sessionId;
+    return sessionId;
   } finally {
     openCodeSessionInit = null;
   }
@@ -333,8 +373,21 @@ async function consumeOpenCodePrompt(sessionId, message, { visualize = false, sy
   throw new Error('Timed out waiting for OpenCode response');
 }
 
-async function submitOpenCodePrompt(sessionId, message, { visualize = false } = {}) {
-  return consumeOpenCodePrompt(sessionId, message, { visualize });
+async function submitOpenCodePrompt(sessionId, message, { visualize = false, systemPrompt = '' } = {}) {
+  return consumeOpenCodePrompt(sessionId, message, { visualize, systemPrompt });
+}
+
+async function runChatPrompt(message, { sessionId, visualize = false } = {}) {
+  const activeSessionId = sessionId || await ensureOpenCodeSession();
+  const result = await submitOpenCodePrompt(activeSessionId, message, {
+    visualize,
+    systemPrompt: MASTER_SYSTEM_PROMPT,
+  });
+
+  return {
+    ...result,
+    sessionId: activeSessionId,
+  };
 }
 
 function safeResolveWithin(baseDir, requestPath = '') {
@@ -361,22 +414,8 @@ function isVizRequest(message) {
   return /visual|diagram|chart|plot|graf|tabelle|table|tree|baum|pie|balken|render|viz/i.test(message);
 }
 
-function extractVizSpecs(text) {
-  const specs = [];
-  const blocks = String(text || '').matchAll(/```vizjson\s*([\s\S]*?)```/gi);
-  for (const match of blocks) {
-    try {
-      const parsed = JSON.parse(match[1].trim());
-      if (parsed && typeof parsed === 'object') specs.push(parsed);
-    } catch {
-      // ignore invalid blocks
-    }
-  }
-  return specs;
-}
-
 function stripVizSpec(text) {
-  return String(text || '').replace(/```vizjson\s*[\s\S]*?```/gi, '').trim();
+  return stripFencedVizSpecs(text);
 }
 
 const INTERNAL_OPEN_CODE_EVENT_TYPES = new Set([
@@ -673,6 +712,92 @@ async function renderVisualizationSpec(spec, filePath) {
   return null;
 }
 
+function collectVizSpecs(payload) {
+  if (Array.isArray(payload)) return payload.filter((item) => item && typeof item === 'object');
+  if (!payload || typeof payload !== 'object') return [];
+  if (payload.type) return [payload];
+  if (Array.isArray(payload.visualizations)) return payload.visualizations.filter((item) => item && typeof item === 'object');
+  if (Array.isArray(payload.specs)) return payload.specs.filter((item) => item && typeof item === 'object');
+  return [];
+}
+
+async function appendVisualizationSpecs(specs, { sessionId = '', source = 'manual' } = {}) {
+  const additions = [];
+
+  for (const spec of specs) {
+    const visualization = await renderVisualizationSpec(spec, undefined);
+    if (!visualization) continue;
+    additions.push({
+      id: randomUUID(),
+      sessionId,
+      source,
+      spec,
+      visualization,
+      createdAt: Date.now(),
+    });
+  }
+
+  if (!additions.length) return [];
+
+  vizStateItems = [...vizStateItems, ...additions];
+  vizStateVersion += 1;
+  return additions;
+}
+
+function clearVisualizationState() {
+  vizStateItems = [];
+  vizStateVersion += 1;
+}
+
+async function syncVisualizationsFromAssistantMessage(sessionId, assistantId) {
+  if (!sessionId || !assistantId) return [];
+
+  const messageKey = `${sessionId}:${assistantId}`;
+  if (processedAssistantMessages.has(messageKey)) return [];
+  processedAssistantMessages.add(messageKey);
+
+  try {
+    const detail = await opencodeRequest(`/session/${sessionId}/message/${assistantId}`, {
+      query: { directory: DATA_ROOT },
+    });
+    const text = readMessageText(detail);
+    const specs = extractVisualizationSpecs(text);
+    if (!specs.length) return [];
+    return appendVisualizationSpecs(specs, { sessionId, source: 'opencode' });
+  } catch {
+    return [];
+  }
+}
+
+async function startOpenCodeVizBridge() {
+  while (true) {
+    try {
+      const canonicalSessionId = await ensureOpenCodeSession();
+      latestOpenCodeSessionId = canonicalSessionId;
+      const iframeUrl = buildOpenCodeSessionUrl(canonicalSessionId);
+      logCanonicalBridgeState(canonicalSessionId, iframeUrl, canonicalSessionId);
+
+      if (canonicalSessionId) {
+        const messages = await opencodeRequest(`/session/${canonicalSessionId}/message`, {
+          query: { directory: DATA_ROOT },
+        });
+
+        if (Array.isArray(messages)) {
+          for (const message of messages) {
+            const info = message?.info || {};
+            if (info.role !== 'assistant' || info.finish !== 'stop' || !info.id) continue;
+            void syncVisualizationsFromAssistantMessage(canonicalSessionId, info.id);
+          }
+        }
+      }
+    } catch {
+      // retry below
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+}
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll('&', '&amp;')
@@ -717,6 +842,55 @@ app.get('/api/files', async (_req, res) => {
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
   }
+});
+
+app.get('/api/config', async (_req, res) => {
+  try {
+    const canonicalSessionId = await ensureOpenCodeSession();
+    const iframeUrl = buildOpenCodeSessionUrl(canonicalSessionId);
+    logCanonicalBridgeState(canonicalSessionId, iframeUrl, canonicalSessionId);
+    res.json({
+      dataRoot: DATA_ROOT,
+      opencodeWebUrl: iframeUrl,
+      activeOpenCodeSessionId: canonicalSessionId,
+    });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+app.get('/api/vizjson', (_req, res) => {
+  res.json({
+    version: vizStateVersion,
+    activeSessionId: latestOpenCodeSessionId,
+    items: vizStateItems,
+  });
+});
+
+app.post('/api/vizjson', async (req, res) => {
+  try {
+    const specs = collectVizSpecs(req.body);
+    if (!specs.length) return res.status(400).json({ error: 'No vizjson specs found' });
+
+    const items = await appendVisualizationSpecs(specs, {
+      sessionId: String(req.body?.sessionId || latestOpenCodeSessionId || ''),
+      source: 'manual',
+    });
+
+    res.json({
+      ok: true,
+      version: vizStateVersion,
+      items,
+      total: vizStateItems.length,
+    });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/vizjson', (_req, res) => {
+  clearVisualizationState();
+  res.json({ ok: true, version: vizStateVersion, items: vizStateItems });
 });
 
 app.get('/api/file', async (req, res) => {
@@ -813,13 +987,12 @@ app.post('/api/chat/stream', async (req, res) => {
       return;
     }
 
-    const result = await runOpenCode({
-      message,
+    const result = await runChatPrompt(message, {
       sessionId: sessionId || undefined,
-      onEvent: (event) => send(event),
+      visualize: isVizRequest(message),
     });
 
-    const vizSpecs = extractVizSpecs(result.text);
+    const vizSpecs = extractVisualizationSpecs(result.text);
     const assistantText = stripVizSpec(result.text);
     const visualizations = [];
     for (const spec of vizSpecs) {
@@ -925,9 +1098,12 @@ app.post('/api/chat', async (req, res) => {
       return;
     }
 
-    const result = await runOpenCode({ message, sessionId: sessionId || undefined });
+    const result = await runChatPrompt(message, {
+      sessionId: sessionId || undefined,
+      visualize: isVizRequest(message),
+    });
 
-    const vizSpecs = extractVizSpecs(result.text);
+    const vizSpecs = extractVisualizationSpecs(result.text);
     const assistantText = stripVizSpec(result.text);
     const visualizations = [];
     for (const spec of vizSpecs) {

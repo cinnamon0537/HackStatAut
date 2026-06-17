@@ -29,7 +29,8 @@ await mkdir('tmp', { recursive: true });
 
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
-await page.goto('http://127.0.0.1:3000', { waitUntil: 'networkidle' });
+await page.goto('http://127.0.0.1:3000', { waitUntil: 'domcontentloaded' });
+await page.waitForTimeout(1500);
 await page.screenshot({ path: 'tmp/hackstataut.png', fullPage: true });
 console.log('Screenshot saved to tmp/hackstataut.png');
 
