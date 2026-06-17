@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 
 const app = express();
 const ROOT = process.cwd();
+const DATA_ROOT = path.resolve(process.env.HACKSTAT_DATA_ROOT || path.join(ROOT, 'database'));
 const PORT = Number(process.env.PORT || 3000);
 const OPENCODE_WEB_PORT = Number(process.env.OPENCODE_WEB_PORT || 4096);
 const OPENCODE_WEB_URL = `http://127.0.0.1:${OPENCODE_WEB_PORT}`;
@@ -40,7 +41,7 @@ async function ensureOpenCodeWeb() {
 
 void ensureOpenCodeWeb();
 
-const IGNORED_DIRS = new Set(['.git', '.secrets', 'node_modules', 'playwright-report', 'test-results', 'tmp']);
+const IGNORED_DIRS = new Set(['.git', '.secrets', '__pycache__', 'node_modules', 'playwright-report', 'test-results', 'tmp']);
 
 const VIZ_PROMPT = [
   'Wenn die Aufgabe eine Visualisierung, Tabelle, ein Diagramm oder eine andere strukturierte Ausgabe verlangt, antworte zusätzlich mit genau einem fenced code block ```vizjson```.',
@@ -168,14 +169,14 @@ async function ensureOpenCodeSession() {
   openCodeSessionInit = (async () => {
     const created = await opencodeRequest('/api/session', {
       method: 'POST',
-      body: { location: { directory: ROOT } },
+      body: { location: { directory: DATA_ROOT } },
     });
     openCodeSessionId = created?.data?.id || created?.id || '';
     if (!openCodeSessionId) throw new Error('OpenCode session could not be created');
 
     await opencodeRequest(`/session/${openCodeSessionId}/init`, {
       method: 'POST',
-      query: { directory: ROOT },
+      query: { directory: DATA_ROOT },
       body: { providerID: OPENCODE_MODEL.providerID, modelID: OPENCODE_MODEL.modelID, messageID: makeMessageId() },
     });
 
@@ -190,18 +191,18 @@ async function ensureOpenCodeSession() {
 }
 
 async function createOpenCodeSession() {
-  const created = await opencodeRequest('/api/session', {
-    method: 'POST',
-    body: { location: { directory: ROOT } },
-  });
+    const created = await opencodeRequest('/api/session', {
+      method: 'POST',
+      body: { location: { directory: DATA_ROOT } },
+    });
   const sessionId = created?.data?.id || created?.id || '';
   if (!sessionId) throw new Error('OpenCode session could not be created');
 
-  await opencodeRequest(`/session/${sessionId}/init`, {
-    method: 'POST',
-    query: { directory: ROOT },
-    body: { providerID: OPENCODE_MODEL.providerID, modelID: OPENCODE_MODEL.modelID, messageID: makeMessageId() },
-  });
+    await opencodeRequest(`/session/${sessionId}/init`, {
+      method: 'POST',
+      query: { directory: DATA_ROOT },
+      body: { providerID: OPENCODE_MODEL.providerID, modelID: OPENCODE_MODEL.modelID, messageID: makeMessageId() },
+    });
 
   return sessionId;
 }
@@ -271,7 +272,7 @@ async function consumeOpenCodePrompt(sessionId, message, { visualize = false, sy
 
   void opencodeRequest(`/session/${sessionId}/prompt_async`, {
     method: 'POST',
-    query: { directory: ROOT },
+    query: { directory: DATA_ROOT },
     body,
   }).catch(() => {});
 
@@ -314,7 +315,7 @@ async function consumeOpenCodePrompt(sessionId, message, { visualize = false, sy
         if (event.type === 'message.updated' && event.data?.info?.role === 'assistant' && event.data?.info?.parentID === userMessageId && event.data?.info?.finish === 'stop') {
           const assistantId = event.data.info.id;
           const detail = await opencodeRequest(`/session/${sessionId}/message/${assistantId}`, {
-            query: { directory: ROOT },
+            query: { directory: DATA_ROOT },
           });
           return {
             assistantId,
@@ -336,15 +337,24 @@ async function submitOpenCodePrompt(sessionId, message, { visualize = false } = 
   return consumeOpenCodePrompt(sessionId, message, { visualize });
 }
 
-function safeResolve(requestPath = '') {
-  const resolved = path.resolve(ROOT, requestPath || '.');
-  const rootPrefix = ROOT.endsWith(path.sep) ? ROOT : `${ROOT}${path.sep}`;
-  if (resolved !== ROOT && !resolved.startsWith(rootPrefix)) {
+function safeResolveWithin(baseDir, requestPath = '') {
+  const base = path.resolve(baseDir);
+  const resolved = path.resolve(base, requestPath || '.');
+  const basePrefix = base.endsWith(path.sep) ? base : `${base}${path.sep}`;
+  if (resolved !== base && !resolved.startsWith(basePrefix)) {
     const err = new Error('Invalid path');
     err.statusCode = 400;
     throw err;
   }
   return resolved;
+}
+
+function safeResolveData(requestPath = '') {
+  return safeResolveWithin(DATA_ROOT, requestPath);
+}
+
+function safeResolveRoot(requestPath = '') {
+  return safeResolveWithin(ROOT, requestPath);
 }
 
 function isVizRequest(message) {
@@ -566,7 +576,7 @@ function rejectDangerousPython(code) {
 
 async function copySelectedFile(workdir, filePath) {
   if (!filePath) return null;
-  const resolved = safeResolve(filePath);
+  const resolved = safeResolveData(filePath);
   const stat = await fs.stat(resolved);
   if (!stat.isFile()) return null;
   if (stat.size > MAX_INPUT_BYTES) return null;
@@ -703,7 +713,7 @@ async function walk(dir, base = ROOT) {
 
 app.get('/api/files', async (_req, res) => {
   try {
-    res.json({ root: ROOT, tree: await walk(ROOT) });
+    res.json({ root: DATA_ROOT, tree: await walk(DATA_ROOT, DATA_ROOT) });
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
   }
@@ -711,11 +721,11 @@ app.get('/api/files', async (_req, res) => {
 
 app.get('/api/file', async (req, res) => {
   try {
-    const filePath = safeResolve(String(req.query.path || ''));
+    const filePath = safeResolveData(String(req.query.path || ''));
     const stat = await fs.stat(filePath);
     if (!stat.isFile()) throw new Error('Not a file');
     const content = await fs.readFile(filePath, 'utf8');
-    res.json({ path: path.relative(ROOT, filePath), content });
+    res.json({ path: path.relative(DATA_ROOT, filePath), content });
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
   }
@@ -723,7 +733,7 @@ app.get('/api/file', async (req, res) => {
 
 app.get('/api/raw', async (req, res) => {
   try {
-    const filePath = safeResolve(String(req.query.path || ''));
+    const filePath = safeResolveRoot(String(req.query.path || ''));
     const stat = await fs.stat(filePath);
     if (!stat.isFile()) throw new Error('Not a file');
     res.setHeader('Content-Length', stat.size);
@@ -842,7 +852,7 @@ app.post('/api/chat/stream', async (req, res) => {
 
 function runOpenCode({ message, sessionId, filePath, onEvent } = {}) {
   return new Promise((resolve, reject) => {
-    const args = ['run', buildOpenCodeMessage(message), '--format', 'json', '--dir', ROOT];
+    const args = ['run', buildOpenCodeMessage(message), '--format', 'json', '--dir', DATA_ROOT];
     if (sessionId) {
       args.push('--session', sessionId);
     }
@@ -851,7 +861,7 @@ function runOpenCode({ message, sessionId, filePath, onEvent } = {}) {
     }
 
     const child = spawn('opencode', args, {
-      cwd: ROOT,
+      cwd: DATA_ROOT,
       env: process.env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
