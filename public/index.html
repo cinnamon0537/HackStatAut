@@ -10,9 +10,17 @@
     <main class="app-shell">
       <section class="workspace">
         <section class="panel transcript-panel">
-          <div class="panel-header app-header">
-            <div class="brand-block">
-              <svg width="84" height="30" viewBox="-10 0 240 86" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="CWYD logo" class="logo-mark compact-logo">
+          <div class="panel-header">
+            <div>
+              <div class="eyebrow">Conversation</div>
+              <h2>Stream</h2>
+            </div>
+            <div class="header-note">Live updates</div>
+          </div>
+
+          <div id="chat-log" class="chat-log transcript-log" aria-live="polite">
+            <div id="chat-intro" class="chat-intro">
+              <svg width="220" height="86" viewBox="-10 0 240 86" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="CWYD logo" class="logo-mark">
                 <g>
 <rect x="-6" y="6" width="10" height="10" fill="#5f6674"/>
 <rect x="4" y="6" width="10" height="10" fill="#5f6674"/>
@@ -136,42 +144,23 @@
 <rect x="200" y="60" width="10" height="10" fill="#f2f2f2"/>
                 </g>
               </svg>
-              <div>
-                <div class="eyebrow">CWYD</div>
-                <h2>OpenCode Session</h2>
-                <div id="data-root-label" class="header-note">Loading datasource...</div>
-              </div>
-            </div>
-
-            <div class="frame-actions">
-              <button id="reload-opencode" class="send-button" type="button">Reload OpenCode</button>
-              <button id="clear-viz" class="send-button ghost-button" type="button">Clear Visualizations</button>
+              <div class="chat-intro-title">ChatWithYourData</div>
+              <div class="chat-intro-path">/mnt/c/Users/benja/Desktop/HackStatAut/database</div>
+              <div class="chat-intro-meta">Main branch (main)</div>
+              <div class="chat-intro-meta">Last modified 3 minutes ago</div>
             </div>
           </div>
 
-          <div class="opencode-main">
-            <iframe id="opencode-frame" class="opencode-frame" title="OpenCode web interface" loading="lazy"></iframe>
-          </div>
+          <form id="chat-form" class="composer" autocomplete="off">
+            <textarea
+              id="chat-input"
+              class="chat-input"
+              rows="1"
+              placeholder="Ask a question about the data..."
+            ></textarea>
+            <button class="send-button" type="submit">Send</button>
+          </form>
         </section>
-
-        <aside class="side-column">
-          <section class="panel viz-panel">
-            <div class="panel-header">
-              <div>
-                <div class="eyebrow">Output</div>
-                <h2>Visualization</h2>
-              </div>
-              <div class="header-note">Charts / Python / tables</div>
-            </div>
-
-            <div class="viz-shell">
-              <div id="viz-meta" class="viz-meta">Ready for the next visualization.</div>
-              <div id="viz-root" class="viz-root">
-                <div class="muted">Visualizations appear here.</div>
-              </div>
-            </div>
-          </section>
-        </aside>
       </section>
     </main>
 

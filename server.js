@@ -60,8 +60,6 @@ const VIZ_PROMPT = [
 const MASTER_SYSTEM_PROMPT = [
   'Du bist ChatWithYourData, ein Assistent für STATcube-Metadaten und -Abfragen.',
   'Arbeite nur mit der lokalen database-Basis und den übergebenen Abfragekontexten.',
-  'Wenn der Nutzer eine Visualisierung, Tabelle oder Struktur will, darfst du genau einen ```vizjson```-Block liefern.',
-  'Der vizjson-Block muss valide sein und kann table, tree, bar, pie oder python verwenden.',
   'Antworte knapp, faktisch und ohne unnötige Meta-Kommentare.',
   'Zeige keine internen Gedankengänge, Zwischenschritte oder Begründungsketten.',
 ].join(' ');
@@ -105,8 +103,6 @@ function logCanonicalBridgeState(canonicalSessionId, iframeUrl, polledSessionId)
   console.log(`iframeUrl=${iframeUrl}`);
   console.log(`polledSessionId=${polledSessionId}`);
 }
-
-void startOpenCodeVizBridge();
 
 function isDemoVisualizationRequest(message) {
   return /\bdemo\s+(grafik|visualisierung|visualization|chart)\b/i.test(String(message || ''))
@@ -989,25 +985,12 @@ app.post('/api/chat/stream', async (req, res) => {
 
     const result = await runChatPrompt(message, {
       sessionId: sessionId || undefined,
-      visualize: isVizRequest(message),
     });
-
-    const vizSpecs = extractVisualizationSpecs(result.text);
-    const assistantText = stripVizSpec(result.text);
-    const visualizations = [];
-    for (const spec of vizSpecs) {
-      const visualization = await renderVisualizationSpec(spec, undefined);
-      if (visualization) visualizations.push(visualization);
-    }
 
     send({
       type: 'final',
       ...result,
-      text: assistantText,
-      vizSpec: vizSpecs[0] || null,
-      vizSpecs,
-      visualization: visualizations[0] || null,
-      visualizations,
+      text: stripVizSpec(result.text),
       sessionId: result.sessionId || sessionId || '',
     });
     finished = true;
@@ -1100,24 +1083,11 @@ app.post('/api/chat', async (req, res) => {
 
     const result = await runChatPrompt(message, {
       sessionId: sessionId || undefined,
-      visualize: isVizRequest(message),
     });
-
-    const vizSpecs = extractVisualizationSpecs(result.text);
-    const assistantText = stripVizSpec(result.text);
-    const visualizations = [];
-    for (const spec of vizSpecs) {
-      const visualization = await renderVisualizationSpec(spec, undefined);
-      if (visualization) visualizations.push(visualization);
-    }
 
     res.json({
       ...result,
-      text: assistantText,
-      vizSpec: vizSpecs[0] || null,
-      vizSpecs,
-      visualization: visualizations[0] || null,
-      visualizations,
+      text: stripVizSpec(result.text),
       sessionId: result.sessionId || sessionId || '',
     });
   } catch (error) {
